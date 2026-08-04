@@ -38,6 +38,26 @@ body {
 }
 
 /*
+ * The document's typeface, chosen per document and handed down from the sheet
+ * as two custom properties.
+ *
+ * These override Tailwind's own font utilities, but only inside `.sheet` — the
+ * application chrome keeps its system stack, because the platform should not
+ * change appearance because a tenant picked Garamond for a letter.
+ */
+.sheet {
+  font-family: var(--doc-body);
+}
+
+.sheet .font-serif {
+  font-family: var(--doc-body);
+}
+
+.sheet .font-sans {
+  font-family: var(--doc-chrome);
+}
+
+/*
  * Microtext.
  *
  * A line of very small repeated type along a border. It is a printing

@@ -99,6 +99,8 @@ export interface Features {
   guilloche: boolean;
   /** The vertical classification strip down the left margin. */
   marginRule: boolean;
+  /** The foil band under the letterhead, with the issuer struck into it. */
+  holoStrip: boolean;
 }
 
 /** The whole builder state. Serialised wholesale into Draft.payload. */
@@ -125,6 +127,11 @@ export interface DocumentDraft {
   footerNote: string;
   version: string;
   revision: string;
+
+  /** Key into TYPEFACES. Local families only — see lib/typefaces. */
+  typeface: string;
+  /** Key into FOILS. Drives the strip and the furniture that echoes it. */
+  foil: string;
 
   features: Features;
 }

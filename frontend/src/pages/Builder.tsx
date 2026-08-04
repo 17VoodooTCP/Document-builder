@@ -8,6 +8,10 @@ import type {
   Draft, DocumentDraft, DocumentKind, IssuedDocument, Organisation, Signatory,
 } from '../lib/types';
 import DocumentSheet from '../components/DocumentSheet';
+import { downloadPdf, pdfFilename } from '../lib/pdf';
+import {
+  DEFAULT_FOIL, DEFAULT_TYPEFACE, FOILS, TYPEFACES, foil as foilFor, typeface as typefaceFor,
+} from '../lib/typefaces';
 import {
   Banner, Button, Card, Field, Input, Mono, PageSpinner, Select, Textarea, Toggle,
 } from '../components/ui';
@@ -48,9 +52,11 @@ const blank = (): DocumentDraft => ({
   footerNote: 'Non-negotiable · Not a statement of account',
   version: '1.0',
   revision: 'A',
+  typeface: DEFAULT_TYPEFACE,
+  foil: DEFAULT_FOIL,
   features: {
     seal: true, watermark: true, qr: true, microtext: true,
-    frame: true, guilloche: true, marginRule: true,
+    frame: true, guilloche: true, marginRule: true, holoStrip: true,
   },
 });
 
@@ -68,7 +74,10 @@ export default function Builder() {
   const [issued, setIssued] = useState<IssuedDocument | null>(null);
   const [pages, setPages] = useState(1);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState<'save' | 'issue' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'issue' | 'pdf' | null>(null);
+  /* The live sheet is what gets captured, so the export is always exactly what
+     is on screen rather than a second rendering that has to be kept in step. */
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   const set = <K extends keyof DocumentDraft>(k: K, v: DocumentDraft[K]) => {
     setDoc((d) => ({ ...d, [k]: v }));
@@ -197,6 +206,24 @@ export default function Builder() {
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not issue that document.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function savePdf() {
+    const sheet = sheetRef.current?.querySelector<HTMLElement>('.sheet');
+    if (!sheet) return;
+    setBusy('pdf');
+    setError('');
+    try {
+      await downloadPdf(sheet, pdfFilename(doc.reference), {
+        title: `${doc.documentTitle || 'Document'} — ${doc.reference}`,
+        subject: doc.subject,
+        author: org?.legalName || org?.name,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not build the PDF.');
     } finally {
       setBusy(null);
     }
@@ -365,6 +392,65 @@ export default function Builder() {
           </p>
         </Card>
 
+        <Card
+          title="Typeface"
+          description="Families already on the reader's machine — nothing is fetched, so the preview, the PDF and the print all match."
+        >
+          <Field label="Document face">
+            <Select value={doc.typeface} onChange={(e) => set('typeface', e.target.value)}>
+              {Object.entries(TYPEFACES).map(([key, t]) => (
+                <option key={key} value={key}>{t.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            {typefaceFor(doc.typeface).note}
+          </p>
+          {/* Set in the face itself, so the choice is made by looking rather
+              than by reading its name. */}
+          <p
+            className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-[13px] leading-relaxed text-slate-800"
+            style={{ fontFamily: typefaceFor(doc.typeface).body }}
+          >
+            We write to confirm the position recorded on our register as at
+            31 March 2026 — reference {doc.reference || 'ABC-260804-1234'}.
+          </p>
+        </Card>
+
+        <Card title="Foil" description="The band under the letterhead, with the issuer struck into it.">
+          <Field label="Finish">
+            <Select value={doc.foil} onChange={(e) => set('foil', e.target.value)}>
+              {Object.entries(FOILS).map(([key, v]) => (
+                <option key={key} value={key}>{v.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">{foilFor(doc.foil).note}</p>
+
+          {/* The swatch is the real gradient, not an approximation of it. */}
+          <div
+            className="mt-3 h-6 rounded"
+            style={{
+              background: `linear-gradient(100deg, ${foilFor(doc.foil).stops.join(', ')})`,
+              border: `1px solid ${foilFor(doc.foil).edge}`,
+            }}
+            aria-hidden="true"
+          />
+
+          <div className="mt-4">
+            <Toggle
+              label="Draw the foil strip"
+              checked={doc.features.holoStrip}
+              onChange={(v) => set('features', { ...doc.features, holoStrip: v })}
+            />
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            A foil shifts colour with the viewing angle and paper cannot, so what prints
+            is that band seen from one angle. It is a printing convention — nothing on the
+            document claims the strip was checked, because nothing checks it.
+          </p>
+        </Card>
+
         <Card title="Printed furniture" description="The standing wording around the letter.">
           <div className="space-y-4">
             <Field label="Header label" hint="Top right, above the reference block.">
@@ -401,23 +487,21 @@ export default function Builder() {
             {savedDraftId ? 'Update draft' : 'Save draft'}
           </Button>
           {/*
-            "Download PDF" opens the browser's print dialog, where the
-            destination is "Save as PDF".
-
-            Not a rasteriser. html2canvas and friends photograph the page and
-            paste the photograph into a PDF: the type stops being type, the
-            microtext turns to mush at any zoom, the QR softens, and the file is
-            ten times the size. The print pipeline emits real vector text and
-            embeds the images at full resolution, which for a document whose
-            fine line work is half the point is the difference between a
-            printable original and a screenshot of one.
+            Writes the .pdf itself rather than handing the job to the print
+            dialog. The dialog's destination is whatever the machine last used,
+            and on Windows that is often "Microsoft XPS Document Writer" — which
+            produces a .xps the operating system then refuses to preview. See
+            lib/pdf for the resolution trade this makes instead.
           */}
-          <Button variant="secondary" onClick={() => window.print()} disabled={!issued || !!mismatch}>
+          <Button onClick={savePdf} loading={busy === 'pdf'} disabled={!issued || !!mismatch}>
             Download PDF
           </Button>
+          <Button variant="secondary" onClick={() => window.print()} disabled={!issued || !!mismatch}>
+            Print
+          </Button>
           <span className="text-xs text-slate-500">
-            Choose &ldquo;Save as PDF&rdquo; as the destination, and leave margins at
-            <em> None</em> — the sheet carries its own.
+            Print keeps the text as text — pick &ldquo;Save as PDF&rdquo; there, not
+            &ldquo;XPS Document Writer&rdquo;.
           </span>
         </div>
 
@@ -464,6 +548,7 @@ export default function Builder() {
           </div>
         )}
 
+        <div ref={sheetRef}>
         <Preview onPages={setPages}>
           <DocumentSheet
             organisation={org}
@@ -476,6 +561,7 @@ export default function Builder() {
             signatureImage={chosen?.signature}
           />
         </Preview>
+        </div>
       </div>
     </div>
   );

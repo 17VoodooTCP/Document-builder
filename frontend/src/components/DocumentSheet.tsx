@@ -3,7 +3,8 @@ import type { DocumentDraft, PortalOrganisation } from '../lib/types';
 import { groupHex } from '../lib/fingerprint';
 import { longDate, paragraphs } from '../lib/format';
 import { qrDataUrl, verifyUrl } from '../lib/qr';
-import { Guilloche, Signature } from './Security';
+import { Guilloche, HoloStrip, Signature } from './Security';
+import { foil as foilFor, typeface as typefaceFor } from '../lib/typefaces';
 
 /**
  * The layout engine. One of it.
@@ -58,6 +59,8 @@ export default function DocumentSheet({
   const accent = org.accentColor || '#0F5F5C';
   const ink = org.inkColor || '#1B2733';
   const f = draft.features;
+  const foilSpec = foilFor(draft.foil);
+  const face = typefaceFor(draft.typeface);
 
   const [qr, setQr] = useState<string | null>(null);
   useEffect(() => {
@@ -78,7 +81,15 @@ export default function DocumentSheet({
   return (
     <article
       className="sheet font-serif shadow-xl"
-      style={{ color: ink }}
+      /* The chosen families are handed down as custom properties and picked up
+         by two rules in index.css. Setting them here rather than on every
+         element means the typeface is one decision in one place, which is the
+         same reason there is one sheet rather than one per document type. */
+      style={{
+        color: ink,
+        ['--doc-body' as string]: face.body,
+        ['--doc-chrome' as string]: face.chrome,
+      } as React.CSSProperties}
       aria-label={`${org.name} — ${draft.documentTitle || KIND_LABEL[draft.kind]}`}
     >
       {/* ── Behind everything ──────────────────────────────────────────────
@@ -171,10 +182,25 @@ export default function DocumentSheet({
           </dl>
         </div>
 
-        {/* Double rule under the letterhead. */}
+        {/* ── Foil strip ───────────────────────────────────────────────────
+            Where a plain double rule used to be. The issuer's name and the
+            document's own reference are struck into the band, so the strip on
+            a page belongs to that page rather than being stationery anyone
+            could reuse. */}
         <div style={{ marginTop: '4mm' }}>
-          <div style={{ height: '0.7mm', background: ink }} />
-          <div style={{ height: '0.2mm', background: ink, marginTop: '0.7mm', opacity: 0.7 }} />
+          {f.holoStrip ? (
+            <HoloStrip
+              stops={foilSpec.stops}
+              text={`${(org.legalName || org.name).toUpperCase()} · ${reference}`}
+              textColor={foilSpec.text}
+              edge={foilSpec.edge}
+            />
+          ) : (
+            <>
+              <div style={{ height: '0.7mm', background: ink }} />
+              <div style={{ height: '0.2mm', background: ink, marginTop: '0.7mm', opacity: 0.7 }} />
+            </>
+          )}
         </div>
 
         {/* ── Margin strip ──────────────────────────────────────────────────

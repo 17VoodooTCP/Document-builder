@@ -180,3 +180,163 @@ export function Signature({
     </div>
   );
 }
+
+/**
+ * The foil strip under the letterhead.
+ *
+ * Replaces what used to be two plain rules. On real stationery this band is
+ * hot-stamped diffraction foil with the issuer's name knocked into it; it
+ * shifts colour as the page turns, which is precisely the thing a photocopier
+ * cannot reproduce and a scan cannot fake.
+ *
+ * Paper and PDF are both fixed-angle media, so what is drawn is the appearance
+ * of that band seen from one angle: a gradient set to `spreadMethod="repeat"`,
+ * sweeping the hues a foil actually travels through, with the lettering struck
+ * into it and a diffraction rule pattern over the top.
+ *
+ * ── Why SVG rather than CSS gradients ─────────────────────────────────────
+ *
+ * The PDF export rasterises the page through html2canvas, whose support for
+ * repeating-linear-gradient is partial and version-dependent. An inline SVG is
+ * serialised and drawn as an image, so the strip in the download is the strip
+ * in the preview. It also stays sharp when printed, where a CSS gradient is at
+ * the mercy of the print pipeline.
+ *
+ * It is furniture, and it claims nothing. Nothing on the document says the
+ * strip was checked, because nothing checks it.
+ */
+export function HoloStrip({
+  stops, text, textColor, edge, height = '1.9mm', repeats = 14,
+}: {
+  stops: string[];
+  text: string;
+  textColor: string;
+  edge: string;
+  height?: string;
+  repeats?: number;
+}) {
+  /*
+   * ~94:1, matching 180mm × 1.9mm on the page, so preserveAspectRatio="none"
+   * distorts the lettering by a percent or two at most.
+   */
+  const W = 1080;
+  const H = 11.5;
+  const FS = 9.5;
+  /* All caps, so there are no descenders to allow for and the band can close
+     right up to the type. */
+  const baseline = H / 2 + FS * 0.36;
+
+  const id = `foil-${Math.abs(seedFrom(stops.join('') + text))}`;
+  const band = ` ${text} ·`.repeat(repeats);
+  const face = "'Segoe UI', Arial, Helvetica, sans-serif";
+
+  /*
+   * Diffraction does not spread its spectrum evenly.
+   *
+   * A grating compresses the blue end and stretches the yellow-red end, so an
+   * evenly-stepped gradient — which is what the first version had — reads as a
+   * printed rainbow rather than as an optical effect. These offsets bunch the
+   * violets and open out through gold, which is the distribution an eye is
+   * used to seeing on a real hot-stamped thread.
+   */
+  const SPREAD = [0, 0.075, 0.185, 0.3, 0.425, 0.565, 0.745, 1];
+  const offsetAt = (i: number) =>
+    stops.length === SPREAD.length ? SPREAD[i] : i / (stops.length - 1);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      height={height}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      role="presentation"
+      style={{ display: 'block' }}
+    >
+      <defs>
+        {/* The spectrum itself. A tight x2 means many narrow repeats across the
+            page — foil bands are fine, and a wide sweep looks like a sunset. */}
+        <linearGradient id={id} x1="0" y1="0" x2="0.07" y2="1" spreadMethod="repeat">
+          {stops.map((c, i) => (
+            <stop key={i} offset={`${offsetAt(i) * 100}%`} stopColor={c} />
+          ))}
+        </linearGradient>
+
+        {/* Specular sheen. Foil is a mirror on a slightly curved substrate, so
+            it is bright along one edge and falls into shadow before the far
+            edge catches the light again. Without this the strip is flat and
+            reads as printed ink. */}
+        <linearGradient id={`${id}-sheen`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.5" />
+          <stop offset="30%" stopColor="#ffffff" stopOpacity="0.12" />
+          <stop offset="52%" stopColor="#000000" stopOpacity="0.07" />
+          <stop offset="80%" stopColor="#000000" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0.18" />
+        </linearGradient>
+
+        {/* The grating itself, ruled fine and raked over. */}
+        <pattern id={`${id}-lines`} width="3.2" height={H} patternUnits="userSpaceOnUse" patternTransform="skewX(-20)">
+          <rect width="1.05" height={H} fill="#ffffff" opacity="0.15" />
+          <rect x="1.9" width="0.45" height={H} fill="#000000" opacity="0.13" />
+        </pattern>
+
+        {/* Kinegram arcs. The concentric figure that catches the light in a
+            band as the page tilts — the detail that separates a security foil
+            from a strip of holographic gift wrap. */}
+        <pattern id={`${id}-arcs`} width={H * 1.55} height={H} patternUnits="userSpaceOnUse">
+          <g fill="none" stroke="#ffffff" strokeWidth="0.26" opacity="0.24">
+            <circle cx={H * 0.78} cy={H / 2} r={H * 0.30} />
+            <circle cx={H * 0.78} cy={H / 2} r={H * 0.52} />
+            <circle cx={H * 0.78} cy={H / 2} r={H * 0.74} />
+          </g>
+        </pattern>
+
+        {/*
+         * Demetallisation.
+         *
+         * This is the change that matters. On a real foil the lettering is not
+         * printed onto the strip — the metal is etched away and the paper shows
+         * through, so the words are holes in the foil rather than ink on top of
+         * it. Setting type over the gradient, which is what the first version
+         * did, is exactly how a counterfeit looks under a glass.
+         *
+         * A luminance mask does it properly: white keeps the foil, black in the
+         * shape of the letters removes it.
+         */}
+        <mask id={`${id}-knock`}>
+          <rect width={W} height={H} fill="#ffffff" />
+          <text
+            x="5" y={baseline}
+            fontSize={FS} fontWeight="700" letterSpacing="2"
+            fill="#000000" fontFamily={face}
+          >
+            {band}
+          </text>
+        </mask>
+      </defs>
+
+      <g mask={`url(#${id}-knock)`}>
+        <rect width={W} height={H} fill={`url(#${id})`} />
+        <rect width={W} height={H} fill={`url(#${id}-arcs)`} />
+        <rect width={W} height={H} fill={`url(#${id}-lines)`} />
+        <rect width={W} height={H} fill={`url(#${id}-sheen)`} />
+      </g>
+
+      {/* A hairline around the etched letters, in the foil's own dark relative.
+          Demetallised edges are never perfectly clean — the metal tears very
+          slightly — and without this the knockout looks die-cut. */}
+      <text
+        x="5" y={baseline}
+        fontSize={FS} fontWeight="700" letterSpacing="2"
+        fill="none" stroke={textColor} strokeWidth="0.2" opacity="0.45"
+        fontFamily={face}
+      >
+        {band}
+      </text>
+
+      {/* Containing hairlines, where the foil meets the paper. */}
+      <rect width={W} height="0.3" fill={edge} opacity="0.9" />
+      <rect y={H - 0.3} width={W} height="0.3" fill={edge} opacity="0.9" />
+    </svg>
+  );
+}
