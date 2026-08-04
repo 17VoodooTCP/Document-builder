@@ -1,0 +1,38 @@
+# Render Blueprint. Dashboard -> New -> Blueprint -> connect this repository.
+services:
+  - type: web
+    name: document-builder-api
+    runtime: node
+    rootDir: backend
+    plan: free            # spins down after ~15 min idle; first request cold-starts
+    region: oregon
+    branch: main
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # `npm install` runs `prisma generate`, which builds the CLIENT.
+      # It does NOT create the database. Run `npm run db:push` once after the
+      # first deploy and after every schema change — otherwise every query
+      # fails while /health stays green and the service looks healthy.
+      #
+      # DATABASE_URL must include a database name before the "?":
+      #   ...mongodb.net/docbuilder?retryWrites=true
+      # Atlas's copy button omits it and the connection dies with
+      # "empty database name not allowed".
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      # Comma-separated origins allowed to call this API. No trailing slashes.
+      - key: FRONTEND_URL
+        sync: false
+      # Where QR codes point — the frontend's public origin.
+      - key: PUBLIC_URL
+        sync: false

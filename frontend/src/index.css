@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-100 text-slate-900 antialiased;
+}
+
+/*
+ * The document sheet.
+ *
+ * Sized in millimetres rather than pixels, because this is the one thing in the
+ * application that exists to become paper. A4 is 210×297mm; the sheet keeps
+ * those proportions on screen so that what is laid out is what prints, and the
+ * preview scales by transform rather than by changing the layout — a sheet that
+ * reflows when the window narrows is a preview of a different document.
+ */
+.sheet {
+  width: 210mm;
+  min-height: 297mm;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+}
+
+.sheet-scale {
+  transform-origin: top center;
+}
+
+/*
+ * Microtext.
+ *
+ * A line of very small repeated type along a border. It is a printing
+ * convention, not a claim — it says nothing, and is legible only under
+ * magnification, which is the whole of its purpose.
+ */
+.microtext {
+  font-size: 2.4px;
+  letter-spacing: 0.35px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+
+/*
+ * Print.
+ *
+ * Everything that is application chrome is removed, the sheet is unscaled and
+ * unshadowed, and colours are forced to print as laid out — browsers drop
+ * background fills by default, which would take the letterhead rule, the
+ * classification band and the accent furniture off the page and leave a
+ * document that does not match its own preview.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .sheet-scale {
+    transform: none !important;
+    width: auto !important;
+  }
+
+  /*
+   * On screen the sheet lives inside a preview column that is narrower than A4
+   * and clips what overflows it. On paper the sheet IS the document, so it is
+   * lifted out of that column entirely and pinned to the page origin — left in
+   * place, the right-hand edge (the seal, the verification panel) would be
+   * cropped off by an ancestor whose only job was to make the preview fit.
+   */
+  .sheet {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+  }
+
+  /* Every ancestor stops clipping and stops reserving space. */
+  #root,
+  #root * {
+    overflow: visible !important;
+    max-width: none !important;
+  }
+
+  .sheet-fit {
+    height: auto !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

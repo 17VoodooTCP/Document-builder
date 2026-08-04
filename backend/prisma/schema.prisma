@@ -1,0 +1,248 @@
+// Document Builder — multi-tenant issuance and verification.
+//
+// The whole difference from the single-brand system this descends from is that
+// nothing here is NorthWhale. Every name, address, colour, logo, watermark and
+// seal belongs to an Organisation row, and a document carries the id of the
+// organisation that issued it. The verification portal renders a scanned
+// document in *that* organisation's identity, which is the entire point: a
+// recipient who scans a code should see the institution that wrote to them, not
+// the platform that generated it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+/// A tenant. Everything a document needs in order to look like it came from
+/// somebody in particular.
+///
+/// ── Why the assets live in the database ─────────────────────────────────
+///
+/// Logos, watermarks and seals are stored as data URLs on this row rather than
+/// in object storage. Render's filesystem is ephemeral — anything written to
+/// disk is gone on the next deploy — so local upload was never an option, and
+/// adding S3 or Cloudinary means a second service, a second set of credentials
+/// and a second thing that can be down when somebody needs to print.
+///
+/// MongoDB documents cap at 16MB. Brand assets are small by nature: a logo is a
+/// few hundred kilobytes and the upload route re-encodes anything larger. Two
+/// or three of those sit comfortably inside the limit, and the row is read once
+/// per document render. When a tenant needs a media library rather than a
+/// brand kit, that is the moment to introduce storage — not before.
+model Organisation {
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// URL-safe identifier. Appears in verification links, so it is public and
+  /// permanent: changing it breaks every code already printed.
+  slug        String  @unique
+  /// Display name, used conversationally. "Northwind Trust"
+  name        String
+  /// Full legal name for document footers and legal copy.
+  legalName   String
+
+  addressLine1 String @default("")
+  addressLine2 String @default("")
+  country      String @default("")
+  supportEmail String @default("")
+  website      String @default("")
+
+  /// Brand assets, as data URLs. Null means "fall back to type" — a document
+  /// with no logo sets the name instead, which is a real letterhead rather
+  /// than a hole where one should be.
+  logo        String?
+  /// Sits behind the body at low opacity.
+  watermark   String?
+  /// Struck beside the signature.
+  seal        String?
+
+  /// Accent, as hex. Drives rules, labels and the portal's furniture, so a
+  /// tenant's documents read as theirs at a glance.
+  accentColor String @default("#0F5F5C")
+  /// Ink for body copy. Near-black rather than black on paper.
+  inkColor    String @default("#1B2733")
+
+  /// Reference prefix, e.g. "NWT" -> NWT-260803-A4F2. Falls back to the slug.
+  referencePrefix String @default("")
+
+  members     Membership[]
+  documents   Document[]
+  templates   DocumentTemplate[]
+  signatories Signatory[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// A person who can sign in and act for an organisation.
+///
+/// Auth is per-user; authority is per-membership. Someone may hold accounts at
+/// two organisations, and a document must record which one they were acting for
+/// when they issued it.
+model User {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  email         String   @unique
+  password      String
+  name          String
+  emailVerified Boolean  @default(false)
+  /// Platform operator, as distinct from an organisation administrator.
+  isPlatformAdmin Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberships   Membership[]
+  authTokens    AuthToken[]
+}
+
+model Membership {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String       @db.ObjectId
+  user           User         @relation(fields: [userId], references: [id])
+  organisationId String       @db.ObjectId
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  /// OWNER | ISSUER | VIEWER. Issuing a document is the privileged action —
+  /// it puts an organisation's name and seal on a page — so it is not the
+  /// default a new member gets.
+  role           String       @default("VIEWER")
+  createdAt      DateTime     @default(now())
+
+  @@index([userId])
+  @@index([organisationId])
+}
+
+/// Single-use credentials. Carried over wholesale from the system this
+/// descends from, including the lesson that cost most to learn there: `usedAt`
+/// is written explicitly as null at creation, because Prisma's MongoDB
+/// connector distinguishes an absent field from a null one and every redemption
+/// is guarded on `usedAt: null`. Leaving it off makes the guard match nothing
+/// and silently refuses every correct code.
+model AuthToken {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String    @db.ObjectId
+  user      User      @relation(fields: [userId], references: [id])
+  purpose   String    // LOGIN | PASSWORD_RESET | EMAIL_VERIFY
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int?      @default(0)
+  issuedBy  String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+}
+
+/// A reusable document shape: letter, certificate, notice, statement.
+///
+/// The layout engine is shared; a template supplies the copy scaffolding and
+/// which blocks appear. That keeps one renderer to maintain rather than one per
+/// document type, which is how these systems usually rot.
+model DocumentTemplate {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organisationId String       @db.ObjectId
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name           String
+  /// LETTER | CERTIFICATE | NOTICE | STATEMENT
+  kind           String       @default("LETTER")
+  /// Printed under the letterhead, e.g. "Official correspondence".
+  documentTitle  String       @default("Official correspondence")
+  subject        String       @default("")
+  body           String       @default("")
+  classification String       @default("Private & Confidential")
+  department     String       @default("")
+  /// Blocks this template draws: seal, watermark, qr, microtext, frame.
+  features       String       @default("seal,watermark,qr,microtext,frame")
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId])
+}
+
+/// Someone who signs on an organisation's behalf.
+model Signatory {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organisationId String       @db.ObjectId
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name       String
+  title      String @default("")
+  department String @default("")
+  /// Two-letter prefix for authorization ids; falls back to the department.
+  prefix     String?
+  /// Optional uploaded signature image, as a data URL. Absent means the name
+  /// is set in a script face instead, which is a facsimile either way.
+  signature  String?
+  isActive   Boolean @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([organisationId, isActive])
+}
+
+/// An issued document. The register the verification portal answers from.
+///
+/// Deliberately does NOT store the body. A verification page that reprints the
+/// document turns a reference number into a way to read other people's
+/// correspondence, and references travel on the outside of envelopes. What is
+/// kept is what a recipient can already see on the paper in front of them, so
+/// they can compare — and the fingerprint, so an altered field shows up.
+model Document {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organisationId String       @db.ObjectId
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  /// Printed on the document and encoded in the QR. Unique per organisation,
+  /// not globally: two tenants may legitimately both use "0001".
+  reference       String
+  verificationId  String
+  /// SHA-256 over the canonical field set. Printed on the paper and shown on
+  /// the portal, so a reader can detect an altered field themselves. The portal
+  /// never receives the document and cannot check this for them.
+  fingerprint     String       @default("")
+
+  kind            String       @default("LETTER")
+  documentTitle   String       @default("")
+  recipientName   String       @default("")
+  subject         String       @default("")
+  department      String       @default("")
+  classification  String       @default("")
+  signerName      String       @default("")
+  signerTitle     String       @default("")
+  authorizationId String       @default("")
+  issuedOn        String       @default("")
+
+  /// ACTIVE | PENDING | EXPIRED | REVOKED
+  status          String       @default("ACTIVE")
+  statusReason    String?
+
+  generatedAt     DateTime     @default(now())
+  lastVerifiedAt  DateTime?
+  verifyCount     Int?         @default(0)
+  issuedBy        String?
+  createdAt       DateTime     @default(now())
+
+  @@unique([organisationId, reference])
+  @@index([organisationId, createdAt])
+  @@index([status])
+}
+
+/// Work in progress. Unversioned on purpose: a draft is scaffolding, and a
+/// history of scaffolding is something nobody asked for and everybody scrolls
+/// past.
+model Draft {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  organisationId String   @db.ObjectId
+  title          String
+  kind           String   @default("LETTER")
+  payload        String   @default("{}")
+  reference      String   @default("")
+  savedBy        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organisationId, updatedAt])
+}
