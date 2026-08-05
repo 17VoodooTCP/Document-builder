@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DocumentDraft, PortalOrganisation } from '../lib/types';
 import { groupHex } from '../lib/fingerprint';
 import { longDate, paragraphs } from '../lib/format';
@@ -43,6 +43,13 @@ interface Props {
   authorizationId: string;
   generatedAt?: string;
   signatureImage?: string | null;
+  /**
+   * Reports how the body was made to fit: the point size it settled at, and
+   * whether it still overran at the smallest size allowed. The builder turns
+   * that into a warning, because the one thing the sheet must not do is drop
+   * text quietly.
+   */
+  onFit?: (info: { pt: number; overflowing: boolean }) => void;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -54,7 +61,7 @@ const KIND_LABEL: Record<string, string> = {
 
 export default function DocumentSheet({
   organisation: org, draft, reference, documentId, fingerprint,
-  authorizationId, generatedAt, signatureImage,
+  authorizationId, generatedAt, signatureImage, onFit,
 }: Props) {
   const accent = org.accentColor || '#0F5F5C';
   const ink = org.inkColor || '#1B2733';
@@ -73,6 +80,47 @@ export default function DocumentSheet({
       .catch(() => { if (live) setQr(null); });
     return () => { live = false; };
   }, [f.qr, org.slug, reference]);
+
+  /*
+   * Shrink-to-fit for the body copy.
+   *
+   * Everything else on the page is fixed furniture — letterhead, signature
+   * block, verification panel — so the body is the only thing that can give.
+   * It is stepped down from 9.5pt in tenths until it clears, with a floor at
+   * 7.4pt because below that a printed letter stops being comfortably readable
+   * and the honest answer is "this is too long for one page" rather than a
+   * technically-compliant page nobody can read.
+   *
+   * Imperative rather than through state: this measures, adjusts and measures
+   * again, and routing each step through a re-render would turn a synchronous
+   * loop into a cascade of paints.
+   */
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /*
+   * The last result reported upward.
+   *
+   * The effect has no dependency array — it must re-measure after every render,
+   * because any field can change the height. But `onFit` sets state in the
+   * builder, and reporting a freshly-built object every pass meant a new state
+   * value every pass, which re-rendered, which re-measured: an infinite loop
+   * that blanked the preview. Only a genuine change is sent.
+   */
+  const lastFit = useRef({ pt: 0, overflowing: false });
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    let pt = 9.5;
+    el.style.fontSize = `${pt}pt`;
+    while (el.scrollHeight > el.clientHeight + 1 && pt > 7.4) {
+      pt = Math.round((pt - 0.1) * 10) / 10;
+      el.style.fontSize = `${pt}pt`;
+    }
+    const next = { pt, overflowing: el.scrollHeight > el.clientHeight + 1 };
+    if (next.pt !== lastFit.current.pt || next.overflowing !== lastFit.current.overflowing) {
+      lastFit.current = next;
+      onFit?.(next);
+    }
+  });
 
   const address = [org.addressLine1, org.addressLine2, org.country].filter(Boolean);
   const office = [draft.department, org.addressLine2 || org.addressLine1].filter(Boolean).join(', ');
@@ -160,7 +208,7 @@ export default function DocumentSheet({
         className="relative flex flex-col"
         style={{
           padding: f.marginRule && draft.classification ? '13mm 15mm 9mm 21mm' : '13mm 15mm 9mm',
-          minHeight: '297mm',
+          height: '297mm',
         }}
       >
         {/* ── Letterhead ────────────────────────────────────────────────── */}
@@ -280,14 +328,18 @@ export default function DocumentSheet({
         )}
 
         {/* ── Body. The one part of a document this system never stores. ── */}
-        <div className="text-[9.5pt] leading-[1.75]" style={{ marginTop: '5mm', textAlign: 'justify', hyphens: 'auto' }}>
+        <div
+          ref={bodyRef}
+          className="min-h-0 flex-1 overflow-hidden leading-[1.75]"
+          style={{ marginTop: '5mm', textAlign: 'justify', hyphens: 'auto' }}
+        >
           {paragraphs(draft.body).map((p, i) => (
             <p key={i} style={{ marginBottom: '3.5mm', whiteSpace: 'pre-line' }}>{p}</p>
           ))}
         </div>
 
         {/* ── Signature and seal ────────────────────────────────────────── */}
-        <div className="flex items-end justify-between gap-6" style={{ marginTop: 'auto', paddingTop: '7mm' }}>
+        <div className="flex items-end justify-between gap-6" style={{ paddingTop: '7mm' }}>
           <div>
             <div className="text-[9pt]" style={{ marginBottom: '1mm' }}>Yours sincerely,</div>
 

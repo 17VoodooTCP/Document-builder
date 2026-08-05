@@ -72,7 +72,7 @@ export default function Builder() {
 
   const [print, setPrint] = useState({ fingerprint: '', authorizationId: '', documentId: '' });
   const [issued, setIssued] = useState<IssuedDocument | null>(null);
-  const [pages, setPages] = useState(1);
+  const [fit, setFit] = useState<{ pt: number; overflowing: boolean }>({ pt: 9.5, overflowing: false });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'save' | 'issue' | 'pdf' | null>(null);
   /* The live sheet is what gets captured, so the export is always exactly what
@@ -536,20 +536,27 @@ export default function Builder() {
           )}
         </div>
 
-        {/* The foot of the sheet says "Page 1 of 1". If the body has pushed it
-            onto a second page that line is no longer true, and the fix is the
-            author's to make — so it is said plainly rather than absorbed. */}
-        {pages > 1 && (
+        {/* The sheet is one page and the body is fitted into it, so the author
+            is told what that cost — and told plainly when it was not enough,
+            because the one thing this must never do is drop text quietly. */}
+        {fit.overflowing ? (
           <div className="no-print mb-4">
             <Banner>
-              This letter now runs to {pages} pages, and the foot of the sheet still reads
-              &ldquo;Page 1 of 1&rdquo;. Shorten the body, or trim the address, before printing.
+              This letter is too long for one page even at the smallest size the body will
+              be set in, so the end of it is being cut off. Shorten the text before issuing.
             </Banner>
           </div>
-        )}
+        ) : fit.pt < 9.5 ? (
+          <div className="no-print mb-4">
+            <Banner tone="info">
+              The body has been reduced to {fit.pt}pt to fit the page. Shorten it to bring
+              it back up to 9.5pt.
+            </Banner>
+          </div>
+        ) : null}
 
         <div ref={sheetRef}>
-        <Preview onPages={setPages}>
+        <Preview>
           <DocumentSheet
             organisation={org}
             draft={doc}
@@ -559,6 +566,7 @@ export default function Builder() {
             authorizationId={print.authorizationId}
             generatedAt={issued ? issued.generatedAt.replace('T', ' ').slice(0, 19) + ' UTC' : undefined}
             signatureImage={chosen?.signature}
+            onFit={setFit}
           />
         </Preview>
         </div>
@@ -580,11 +588,7 @@ export default function Builder() {
 const A4_W = 793.7;
 const A4_H = 1122.5;
 
-function Preview({ children, onPages }: {
-  children: React.ReactNode;
-  /** Reports how many A4 pages the sheet currently runs to. */
-  onPages?: (pages: number) => void;
-}) {
+function Preview({ children }: { children: React.ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [height, setHeight] = useState(A4_H);
@@ -623,10 +627,6 @@ function Preview({ children, onPages }: {
        growing by a paragraph — arrives through the observer, which is cheaper
        than re-measuring on each render and cannot feed itself. */
   }, []);
-
-  useEffect(() => {
-    onPages?.(Math.max(1, Math.ceil(height / A4_H - 0.02)));
-  }, [height, onPages]);
 
   return (
     <div ref={box}>

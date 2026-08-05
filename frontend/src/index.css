@@ -27,7 +27,16 @@ body {
  */
 .sheet {
   width: 210mm;
-  min-height: 297mm;
+  /*
+   * Exactly A4, never "at least" A4.
+   *
+   * This was min-height, so a long letter simply made the sheet taller — and
+   * the PDF exporter, which slices the capture into A4 pages, dutifully emitted
+   * a second one carrying the tail of the footer. A document whose own foot
+   * reads "Page 1 of 1" arriving as two pages is the sheet contradicting
+   * itself. The body now fits the page instead of the page fitting the body.
+   */
+  height: 297mm;
   position: relative;
   overflow: hidden;
   background: #fff;
