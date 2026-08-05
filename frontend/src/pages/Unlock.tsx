@@ -149,6 +149,7 @@ export default function Unlock() {
   if (!user) return <Navigate to="/login" replace />;
   if (user.unlockedAt) return <Navigate to="/organisations" replace />;
 
+
   return (
     <div className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-14">
       <div className="absolute inset-0" aria-hidden="true">

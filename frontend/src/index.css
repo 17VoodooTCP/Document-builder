@@ -391,3 +391,218 @@ body {
     display: none !important;
   }
 }
+
+/*
+ * EvilCat v1 — engraved into the sign-in panel.
+ *
+ * Every rule below animates `transform` or `opacity` and nothing else, so the
+ * compositor owns all of it: no layout, no paint, no reflow, and no contention
+ * with the LetterGlitch canvas running behind the card. The card itself is
+ * `overflow: hidden`, which is what guarantees the mark can never escape the
+ * panel however far a transform pushes it.
+ *
+ * State arrives as a class on the container and is distributed through custom
+ * properties, so each moving part reads the one value it cares about and the
+ * combinations — eyes down *and* shut, head raised *and* tilted — compose
+ * instead of overwriting one another.
+ */
+
+.ec {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  /* Neutral resting weight, inside the 4–7% the brief asks for. */
+  opacity: 0.05;
+  transition: opacity 300ms ease;
+
+  --ec-head-y: 0px;
+  --ec-head-r: 0deg;
+  --ec-ear-y: 0px;
+  --ec-eye-y: 0px;
+  --ec-lid: 1;
+}
+
+/* The panel lifts it slightly under the cursor. */
+.ec-host:hover .ec {
+  opacity: 0.08;
+}
+
+.ec-svg {
+  /* 86% of the card, aspect preserved, centred — the full cat always visible.
+     Capped on both axes so the constraining dimension always wins: in a wide,
+     short panel that is the height, and without the cap the shield overran the
+     bottom edge and was clipped. */
+  width: 86%;
+  height: 86%;
+  max-width: 86%;
+  max-height: 86%;
+  /* Nothing outside the viewBox may paint. The card clips too, but relying on
+     that alone means the artwork is *cropped* rather than *contained*. */
+  overflow: hidden;
+  transform: scale(1);
+  will-change: transform;
+}
+
+/* Stroke-only engraving. The hairline of white beneath the dark line is what
+   reads as cut into the surface rather than printed on it. */
+.ec-ink {
+  fill: none;
+  stroke: #0f172a;
+  stroke-width: 20;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1.5px 0 rgb(255 255 255 / 0.75));
+}
+
+.ec-ink .ec-antenna-tip,
+.ec-ink .ec-eye circle {
+  fill: #0f172a;
+  stroke: none;
+}
+
+/* The gold twin. Invisible until the sweep passes over it. */
+.ec-gold {
+  fill: none;
+  stroke: #d4af37;
+  stroke-width: 20;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+.ec-gold .ec-antenna-tip,
+.ec-gold .ec-eye circle {
+  fill: #d4af37;
+  stroke: none;
+}
+
+/*
+ * Breathing.
+ *
+ * One percent over eight seconds — deliberately at the edge of perception. Any
+ * larger and it becomes a thing on the page that moves, which is the opposite
+ * of what a panel about privacy should feel like.
+ */
+.ec-breath {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ec-breathe 8s ease-in-out infinite;
+}
+
+@keyframes ec-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.01); }
+}
+
+.ec-head,
+.ec-ears,
+.ec-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ec-head {
+  transform: translateY(var(--ec-head-y)) rotate(var(--ec-head-r));
+  transition: transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.ec-ears {
+  transform: translateY(var(--ec-ear-y));
+  transition: transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/*
+ * The eyes carry two independent jobs on one property: where they are looking,
+ * and whether they are open. Composed from separate variables so focusing the
+ * email field and then shutting for the password does not lose the gaze, and
+ * so neither transition has to know the other exists.
+ *
+ * The lid is slower than the gaze — 250ms against 200ms — because closing is
+ * meant to read as deliberate, and a fast one reads as a blink.
+ */
+.ec-eye {
+  transform: translateY(var(--ec-eye-y)) scaleY(var(--ec-lid));
+  transition:
+    transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Email focused: looking down at the field, ears up, head raised ───────── */
+.ec--email {
+  --ec-head-y: -3px;
+  --ec-ear-y: -2px;
+  --ec-eye-y: 7px;
+}
+
+/* ── Password focused and masked: eyes shut, head still ───────────────────── */
+.ec--password {
+  --ec-lid: 0.07;
+}
+
+/* ── Password revealed: open again, looking forward ───────────────────────── */
+.ec--reveal {
+  --ec-lid: 1;
+  --ec-eye-y: 0px;
+}
+
+/* ── Refused: one slow blink and a two-degree tilt ────────────────────────── */
+.ec--error .ec-eye {
+  animation: ec-blink 900ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ec--error .ec-head {
+  animation: ec-tilt 900ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes ec-blink {
+  0%, 100%  { transform: scaleY(1); }
+  42%, 58%  { transform: scaleY(0.07); }
+}
+
+@keyframes ec-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  40%      { transform: rotate(2deg); }
+}
+
+/* ── Authenticated: one soft swell, and gold running through the line ─────── */
+.ec--success .ec-svg {
+  animation: ec-swell 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ec--success .ec-gold {
+  opacity: 1;
+}
+
+.ec--success .ec-sheen-band {
+  animation: ec-sweep 600ms cubic-bezier(0.45, 0, 0.3, 1);
+}
+
+@keyframes ec-swell {
+  0%, 100% { transform: scale(1); }
+  45%      { transform: scale(1.02); }
+}
+
+@keyframes ec-sweep {
+  from { transform: translateX(0); }
+  to   { transform: translateX(576px); }
+}
+
+/*
+ * Reduced motion.
+ *
+ * The state changes are kept — they are information, not ornament, and somebody
+ * who has asked for less movement still deserves to be told the eyes are shut
+ * while their password is on screen. What goes is everything that loops or
+ * travels: the breathing, the sweep, the blink, the tilt.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ec-breath,
+  .ec--error .ec-eye,
+  .ec--error .ec-head,
+  .ec--success .ec-svg,
+  .ec--success .ec-sheen-band {
+    animation: none;
+  }
+}

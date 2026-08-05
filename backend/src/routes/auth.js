@@ -9,6 +9,7 @@ const {
   accessCookie, refreshCookie,
 } = require('../utils/jwt');
 const { authenticate } = require('../middleware/auth');
+const { settings } = require('../utils/settings');
 
 const router = express.Router();
 
@@ -99,6 +100,24 @@ const userShape = {
   unlockedAt: true, createdAt: true,
 };
 
+/**
+ * Is the paywall actually enforceable right now?
+ *
+ * Exactly the condition middleware/paywall applies: with no receiving address
+ * on either chain nobody can pay, so the gate fails open there and must read as
+ * open here too.
+ *
+ * It travels with the session because the client's route guard needs the same
+ * answer, and the only other way to give it one is to let it discover the truth
+ * by being redirected — which is how a guard that sends unpaid users to the
+ * unlock page, and an unlock page that sends them back because there is nothing
+ * to buy, become an infinite loop between them.
+ */
+const paywallActive = async () => {
+  const c = await settings();
+  return !!(c.btcAddress || c.usdtTronAddress);
+};
+
 /** Memberships, flattened — the client needs "which organisations, as what". */
 async function membershipsFor(userId) {
   const rows = await prisma.membership.findMany({
@@ -172,7 +191,10 @@ router.post('/register',
       const isPlatformAdmin = await reconcileOperator(user);
 
       const { accessToken } = issueSession(res, user.id);
-      res.status(201).json({ user: { ...user, isPlatformAdmin }, memberships: [], accessToken });
+      res.status(201).json({
+        user: { ...user, isPlatformAdmin }, memberships: [], accessToken,
+        paywallActive: await paywallActive(),
+      });
     } catch (err) {
       /*
        * A taken address is reported plainly. The alternative — accepting the
@@ -232,6 +254,7 @@ router.post('/login',
         },
         memberships: await membershipsFor(record.id),
         accessToken,
+        paywallActive: await paywallActive(),
       });
     } catch (err) { next(err); }
   });
@@ -262,7 +285,10 @@ router.post('/refresh', async (req, res, next) => {
     if (!user) return res.status(401).json({ error: 'Not signed in.' });
 
     const { accessToken } = issueSession(res, user.id);
-    res.json({ user, memberships: await membershipsFor(user.id), accessToken });
+    res.json({
+      user, memberships: await membershipsFor(user.id), accessToken,
+      paywallActive: await paywallActive(),
+    });
   } catch (err) {
     if (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError') {
       /* Clear the cookies on the way out. A refresh token the browser keeps
@@ -304,7 +330,11 @@ router.post('/logout', (req, res) => {
  */
 router.get('/me', authenticate, async (req, res, next) => {
   try {
-    res.json({ user: req.user, memberships: await membershipsFor(req.user.id) });
+    res.json({
+      user: req.user,
+      memberships: await membershipsFor(req.user.id),
+      paywallActive: await paywallActive(),
+    });
   } catch (err) { next(err); }
 });
 

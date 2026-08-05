@@ -9,6 +9,8 @@ interface Session {
   user: User;
   memberships: Membership[];
   accessToken?: string;
+  /** Whether the API is currently able to enforce the paywall. */
+  paywallActive?: boolean;
 }
 
 interface AuthValue {
@@ -21,6 +23,14 @@ interface AuthValue {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Whether the paywall is live, as the API reports it.
+   *
+   * Defaults to false so a session that predates the field, or one fetched
+   * while the API is unreachable, lets people through rather than stranding
+   * them behind a gate the client cannot confirm exists.
+   */
+  paywallActive: boolean;
   /** Called after creating an organisation, so the switcher shows it. */
   reload: () => Promise<void>;
   roleAt: (slug: string) => Role | null;
@@ -38,12 +48,14 @@ export const atLeast = (role: Role | null, min: Role) =>
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [paywallActive, setPaywallActive] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const adopt = useCallback((s: Session) => {
     if (s.accessToken) setAccessToken(s.accessToken);
     setUser(s.user);
     setMemberships(s.memberships || []);
+    setPaywallActive(!!s.paywallActive);
   }, []);
 
   /*
@@ -77,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setUser(null);
     setMemberships([]);
+    setPaywallActive(false);
     await api('/auth/logout', { method: 'POST', body: {}, noRetry: true }).catch(() => {});
   }, []);
 
@@ -84,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const s = await api<Session>('/auth/me');
     setUser(s.user);
     setMemberships(s.memberships || []);
+    setPaywallActive(!!s.paywallActive);
   }, []);
 
   const roleAt = useCallback(
@@ -95,8 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthValue>(
-    () => ({ user, memberships, loading, login, register, logout, reload, roleAt }),
-    [user, memberships, loading, login, register, logout, reload, roleAt],
+    () => ({ user, memberships, loading, paywallActive, login, register, logout, reload, roleAt }),
+    [user, memberships, loading, paywallActive, login, register, logout, reload, roleAt],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

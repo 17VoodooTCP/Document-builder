@@ -52,10 +52,21 @@ function RequireAuth({ children }: { children: ReactNode }) {
  * A platform operator passes, matching the middleware.
  */
 function RequirePaid({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, paywallActive } = useAuth();
   if (loading) return <PageSpinner />;
   if (!user) return <Navigate to="/login" replace />;
-  if (!user.unlockedAt && !user.isPlatformAdmin) return <Navigate to="/unlock" replace />;
+  /*
+   * `paywallActive` is what stops this becoming a loop.
+   *
+   * With no receiving address configured the API's own gate fails open, and
+   * without asking it this guard would keep sending people to an unlock page
+   * that has nothing to sell them — which, if that page bounced them back,
+   * is two components redirecting at each other forever. One source of truth,
+   * and it is the server's.
+   */
+  if (paywallActive && !user.unlockedAt && !user.isPlatformAdmin) {
+    return <Navigate to="/unlock" replace />;
+  }
   return <>{children}</>;
 }
 
