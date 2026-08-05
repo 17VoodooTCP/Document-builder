@@ -146,7 +146,23 @@ export default function DocumentSheet({
         </div>
       ))}
 
-      <div className="relative flex flex-col" style={{ padding: '13mm 15mm 9mm', minHeight: '297mm' }}>
+      {/*
+        The left margin widens when the classification strip is drawn.
+
+        The strip used to sit at 10.5mm against text starting at 15mm — about
+        two millimetres of clearance once the vertical line box was accounted
+        for, which is inside the margin of error for font metrics and letter
+        spacing, and it collided with the body copy. Space is now reserved for
+        it rather than assumed. An asymmetric left margin is what a document
+        with a margin marking has always had.
+      */}
+      <div
+        className="relative flex flex-col"
+        style={{
+          padding: f.marginRule && draft.classification ? '13mm 15mm 9mm 21mm' : '13mm 15mm 9mm',
+          minHeight: '297mm',
+        }}
+      >
         {/* ── Letterhead ────────────────────────────────────────────────── */}
         <header className="flex items-start justify-between gap-6">
           <div className="min-w-0">
@@ -210,7 +226,7 @@ export default function DocumentSheet({
         {f.marginRule && draft.classification && (
           <div
             className="pointer-events-none absolute flex flex-col items-center"
-            style={{ left: '10.5mm', top: '95mm', bottom: '70mm' }}
+            style={{ left: '9mm', width: '5mm', top: '95mm', bottom: '70mm' }}
             aria-hidden="true"
           >
             <div style={{ width: '0.2mm', flex: 1, background: ink, opacity: 0.3 }} />
@@ -391,9 +407,13 @@ export default function DocumentSheet({
 
           {/* Bottom bar. What the document is NOT is the line that stops it
               being waved at a counter as though it were something else. */}
+          {/* No rule above this. There is already a dashed separator opening
+              the panel and a solid one under the letterhead; a third line four
+              millimetres from the paper's edge reads as a mistake, and it was
+              the one that stopped short of the verification panel. */}
           <div
             className="flex items-center justify-between font-sans text-[5.5pt] uppercase tracking-[0.14em] opacity-60"
-            style={{ marginTop: '3.5mm', borderTop: `0.15mm solid ${ink}`, paddingTop: '1.5mm' }}
+            style={{ marginTop: '3.5mm' }}
           >
             <span>{draft.footerNote}</span>
             <span className="font-mono tracking-[0.08em]">{documentId}</span>

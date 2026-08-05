@@ -122,8 +122,15 @@ export function Signature({
      rather than written. */
   const tilt = (next() * 2.4 - 1.2).toFixed(2);
 
+  /*
+   * Sized to the signature, not to the column.
+   *
+   * At 58mm the rule ran two and a half times the width of the name resting on
+   * it, which reads as a form field somebody forgot to fill rather than as a
+   * line that was signed over.
+   */
   return (
-    <div style={{ width: '58mm' }}>
+    <div style={{ width: '46mm' }}>
       <div style={{ height: '9mm' }} className="flex items-end overflow-hidden">
         {image ? (
           <img
@@ -131,7 +138,7 @@ export function Signature({
             alt=""
             aria-hidden="true"
             style={{
-              maxHeight: '9mm', maxWidth: '52mm',
+              maxHeight: '9mm', maxWidth: '42mm',
               /* Scans arrive as dark-on-white JPEGs. Multiply drops the white
                  so the stroke sits on the paper rather than in a grey box. */
               mixBlendMode: 'multiply',
