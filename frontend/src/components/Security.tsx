@@ -130,7 +130,16 @@ export function Signature({
    * line that was signed over.
    */
   return (
-    <div style={{ width: '46mm' }}>
+    /*
+     * The rule tracks the name, rather than the column.
+     *
+     * A fixed width meant the line ran to the same place whether it carried
+     * "Li Wei" or "Alexandra Fitzwilliam-Vance", and under a short name it read
+     * as an unfilled form field. Shrink-to-fit with bounds keeps it in
+     * proportion to whatever is actually resting on it: never stubbier than a
+     * signature line should be, never running off toward the seal.
+     */
+    <div style={{ width: 'fit-content', minWidth: '30mm', maxWidth: '46mm' }}>
       <div style={{ height: '9mm' }} className="flex items-end overflow-hidden">
         {image ? (
           <img
@@ -163,6 +172,9 @@ export function Signature({
               display: 'inline-block',
               transform: `rotate(${tilt}deg)`,
               paddingBottom: '0.6mm',
+              /* A few millimetres of run-out past the last letter, so the rule
+                 reads as a line signed over rather than one drawn to the name. */
+              paddingRight: '5mm',
               /* A hairline of the same ink, offset a fraction. Reads as the
                  weight variation of a nib rather than as a drop shadow. Scaled
                  down with the type — at 14pt anything heavier looks bold. */
@@ -176,10 +188,19 @@ export function Signature({
 
       <div style={{ height: '0.25mm', background: ink, opacity: 0.65 }} />
 
-      {/* Microprinting. Legible only under magnification, which is its job. */}
+      {/*
+        Microprinting. Legible only under magnification, which is its job.
+
+        `width: 0` with `min-width: 100%` keeps it out of the shrink-to-fit
+        calculation while still spanning whatever width the block settles on.
+        Without it this line — fourteen repetitions of a nowrap string — was the
+        widest thing in the block, so `fit-content` resolved to the 46mm cap
+        every time and the rule went back to running twice the length of the
+        name. The repeats overflow and are clipped, which is what they are for.
+      */}
       <div
         className="microtext"
-        style={{ color: ink, opacity: 0.75, marginTop: '0.5mm' }}
+        style={{ color: ink, opacity: 0.75, marginTop: '0.5mm', width: 0, minWidth: '100%' }}
         aria-hidden="true"
       >
         {`AUTHORISED FOR ISSUE · ${authorizationId} · `.repeat(14)}

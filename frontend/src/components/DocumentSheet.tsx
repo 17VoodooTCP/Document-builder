@@ -274,7 +274,15 @@ export default function DocumentSheet({
         {f.marginRule && draft.classification && (
           <div
             className="pointer-events-none absolute flex flex-col items-center"
-            style={{ left: '9mm', width: '5mm', top: '95mm', bottom: '70mm' }}
+            /*
+              Centred in the gutter, not pushed to one side of it.
+
+              At 9mm it cleared the body text — 8mm of air on that side — but
+              sat 2.4mm off the inner frame rule, so it read as colliding with
+              the border instead. The gutter runs from the frame at 7.6mm to the
+              text at 21mm; this splits it, leaving about 5mm either side.
+            */
+            style={{ left: '12.8mm', width: '3mm', top: '95mm', bottom: '70mm' }}
             aria-hidden="true"
           >
             <div style={{ width: '0.2mm', flex: 1, background: ink, opacity: 0.3 }} />
