@@ -66,6 +66,43 @@ export async function downloadPdf(el: HTMLElement, filename: string, meta: PdfMe
     windowWidth: el.offsetWidth,
     windowHeight: el.offsetHeight,
     onclone: (doc) => {
+      /*
+       * Carry the stylesheets into the clone as text.
+       *
+       * html2canvas renders from a copy of the document in a detached iframe.
+       * The copy inherits the <link rel="stylesheet"> element but not
+       * necessarily a *loaded* stylesheet, and the capture does not wait for
+       * one — so in a production build, where Vite emits a single external CSS
+       * file, the clone was being drawn before any of it applied. Inline styles
+       * survived and every class did not: the sheet lost its A4 box, every
+       * `absolute` fell into normal flow, and the microtext rendered at body
+       * size, producing pages of repeated reference numbers.
+       *
+       * It never showed up in development because Vite injects CSS as inline
+       * <style> tags there, which the clone copies wholesale. The bug existed
+       * only in the built artefact — which is the one that matters.
+       *
+       * Serialising the rules removes the timing question entirely: the clone
+       * has the CSS before it is drawn, because it is in the markup.
+       */
+      const css = Array.from(document.styleSheets)
+        .map((sheet) => {
+          try {
+            return Array.from(sheet.cssRules).map((rule) => rule.cssText).join('\n');
+          } catch {
+            /* A genuinely cross-origin sheet refuses .cssRules. None of ours
+               are, and skipping one is better than failing the export. */
+            return '';
+          }
+        })
+        .join('\n');
+
+      if (css) {
+        const style = doc.createElement('style');
+        style.textContent = css;
+        doc.head.appendChild(style);
+      }
+
       doc.querySelectorAll<HTMLElement>('.sheet-scale').forEach((n) => {
         n.style.transform = 'none';
         n.style.width = 'auto';
