@@ -40,7 +40,7 @@ export default function Register() {
   return (
     <AuthShell
       title="Create an account"
-      footer={<>Already registered? <Link to="/login" className="font-medium text-slate-900 underline underline-offset-2">Sign in</Link>.</>}
+      footer={<>Already registered? <Link to="/login" className="font-medium text-white underline underline-offset-2">Sign in</Link>.</>}
     >
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner>{error}</Banner>}
