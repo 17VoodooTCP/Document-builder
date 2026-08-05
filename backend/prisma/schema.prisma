@@ -90,11 +90,97 @@ model User {
   emailVerified Boolean  @default(false)
   /// Platform operator, as distinct from an organisation administrator.
   isPlatformAdmin Boolean @default(false)
+
+  /// When this account paid for access. Null means it has not.
+  ///
+  /// A one-off unlock, so this is a timestamp rather than an expiry: once set
+  /// it is never cleared by the passage of time. It gates the workspace only —
+  /// never /verify, because a recipient holding a letter is not a customer and
+  /// must never be asked to pay to check a reference.
+  unlockedAt    DateTime?
+  /// Which payment did it. Kept so support can answer "I paid, what happened".
+  unlockedBy    String?
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   memberships   Membership[]
   authTokens    AuthToken[]
+  payments      Payment[]
+}
+
+/// An invoice, and the chain watching that settles it.
+///
+/// ── How a payment is matched ──────────────────────────────────────────────
+///
+/// Funds go straight to the operator's own wallet — there is no processor and
+/// no custody here — which means every invoice shares one receiving address per
+/// chain. What distinguishes them is the amount: each invoice is issued for a
+/// slightly unique figure, and the watcher looks for a transfer of exactly that
+/// figure to that address, dated after the invoice was raised.
+///
+/// The honest limitation, stated because it is easy to pretend otherwise: this
+/// is amount-matching, not address-per-invoice. Uniqueness is enforced against
+/// every other *open* invoice, and the window is short, so a collision needs
+/// two payers to be quoted the same figure within the same half hour. Per
+/// invoice addresses would remove even that, and would need an extended public
+/// key for Bitcoin and a different wallet arrangement for Tron. When volume
+/// makes the collision real rather than theoretical, that is the change to
+/// make.
+model Payment {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String   @db.ObjectId
+  user          User     @relation(fields: [userId], references: [id])
+
+  /// BTC | USDT
+  asset         String
+  /// BITCOIN | TRON
+  chain         String
+  /// The operator's receiving address, copied at issue time. Kept on the row
+  /// so that rotating the configured wallet cannot orphan an open invoice.
+  address       String
+
+  /// The exact figure to send, as a decimal string. Never a float: 0.1 + 0.2
+  /// is not 0.3, and a payment matcher that rounds is one that rejects correct
+  /// payments.
+  amount        String
+  /// The same figure in the chain's base units — satoshis, or USDT×10⁶. This
+  /// is what the comparison actually runs on, as an exact integer string.
+  amountUnits   String
+
+  /// Price in US cents at the moment the invoice was raised.
+  priceCents    Int
+  /// The asset's USD rate used for the conversion, pinned at issue.
+  rate          String
+
+  /// PENDING | SEEN | CONFIRMED | EXPIRED | MISMATCH
+  ///
+  /// SEEN means a transfer of the right amount is on the chain but has not yet
+  /// met the confirmation threshold. It is deliberately its own state: telling
+  /// somebody "not paid" while their transaction sits in a block is how support
+  /// queues fill up.
+  status        String   @default("PENDING")
+  statusDetail  String?
+
+  txid          String?
+  confirmations Int      @default(0)
+  /// What actually arrived, when it differs from what was asked for. Shown to
+  /// the payer verbatim rather than rounded away.
+  receivedUnits String?
+
+  seenAt        DateTime?
+  confirmedAt   DateTime?
+  expiresAt     DateTime
+  /// Rate-limits the explorer polling. The client polls this row; this row
+  /// decides whether that warrants asking a public API again.
+  lastCheckedAt DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status, expiresAt])
+  @@index([chain, amountUnits, status])
 }
 
 model Membership {

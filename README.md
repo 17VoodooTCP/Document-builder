@@ -109,6 +109,10 @@ npm run dev
 | `FRONTEND_URL` | backend | Comma-separated origins for CORS. |
 | `PUBLIC_URL` | backend | Where QR codes point. The frontend's public origin. |
 | `VITE_API_URL` | frontend | Backend origin, no trailing slash, no `/api`. |
+| `UNLOCK_PRICE_USD` | backend | Price of the one-off unlock, in whole dollars. Defaults to 49. |
+| `BTC_ADDRESS` | backend | Your Bitcoin receiving address. |
+| `USDT_TRON_ADDRESS` | backend | Your **Tron (TRC-20)** USDT address. Any other chain will never match. |
+| `TRONGRID_API_KEY` | backend | Optional. Raises the TronGrid rate limit. |
 
 ### Deployment notes
 
@@ -165,6 +169,53 @@ Refresh tokens are stateless, so nothing can strike an individual one out.
 `/auth/logout` clears the cookies and the client discards its copy; a token
 already copied elsewhere works until it expires. The route is not called
 "revoke", because revocation is not what happens.
+
+## Paid access
+
+A one-off unlock per account, settled in Bitcoin or in USDT on Tron.
+
+There is no payment processor. Funds go straight to the operator's own wallets,
+and the API watches public explorers — mempool.space and TronGrid — for a
+transfer that matches. Nothing in this codebase holds a key that could move
+money, and the configured addresses are receive-only as far as it is concerned.
+
+**How a payment is matched.** Every invoice shares one receiving address per
+chain, so what distinguishes them is the amount: each is quoted a figure with a
+few base units of noise on top, checked for uniqueness against every other open
+invoice. The watcher looks for a transfer of exactly that figure, dated after
+the invoice was raised. The honest limit is that this is amount-matching rather
+than an address per invoice — a collision needs two payers quoted the same
+figure inside the same half hour. When volume makes that real rather than
+theoretical, per-invoice addresses are the change to make.
+
+**Amounts are integers.** Satoshis and USDT×10⁶, compared as `BigInt`. Never
+floats: `0.1 + 0.2` is not `0.3`, and a matcher that rounds silently rejects
+correct payments and occasionally accepts short ones.
+
+**Tron, specifically TRC-20.** Filtered on the USDT contract address, not on
+the token's name — a TRC-20 token can call itself whatever it likes, and
+matching on a symbol is how a checkout credits somebody for a worthless token
+they minted that morning.
+
+**What the paywall never covers.** `/verify` is free and always will be. A
+recipient who scans a code on a letter is not a customer, has no account, and
+has no idea this platform exists. Gating that would break the promise the
+document makes on its own face — and break it for every code already printed,
+including ones issued while the tenant was paying.
+
+### The trap in this feature, twice
+
+`Payment` matching taught the same lesson the schema already records against
+`AuthToken.usedAt`, and it is worth stating a third time because it costs money
+here rather than time. Prisma's MongoDB connector treats an **absent** field and
+an explicit **null** as different things. Every `User` row written before
+`unlockedAt` existed has no such key, so a guard of `where: { unlockedAt: null }`
+matches nothing, updates nobody, and fails silently — leaving a customer with a
+payment confirmed on-chain and no access to what they bought.
+
+The filter is `OR: [{ unlockedAt: null }, { unlockedAt: { isSet: false } }]`, and
+a confirmed payment that somehow did not unlock anything is repaired on the next
+poll rather than left for a support ticket.
 
 ## The fingerprint
 

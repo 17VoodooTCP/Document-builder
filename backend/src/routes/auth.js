@@ -67,7 +67,8 @@ const BCRYPT_ROUNDS = 12;
 
 /** Everything the client is told about itself. Never the password hash. */
 const userShape = {
-  id: true, email: true, name: true, emailVerified: true, isPlatformAdmin: true, createdAt: true,
+  id: true, email: true, name: true, emailVerified: true, isPlatformAdmin: true,
+  unlockedAt: true, createdAt: true,
 };
 
 /** Memberships, flattened — the client needs "which organisations, as what". */
@@ -194,6 +195,7 @@ router.post('/login',
           name: record.name,
           emailVerified: record.emailVerified,
           isPlatformAdmin: record.isPlatformAdmin,
+          unlockedAt: record.unlockedAt,
           createdAt: record.createdAt,
         },
         memberships: await membershipsFor(record.id),

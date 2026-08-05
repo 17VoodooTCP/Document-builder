@@ -10,6 +10,7 @@ import NotFound from './pages/NotFound';
 import Organisations from './pages/Organisations';
 import Register from './pages/Register';
 import Settings from './pages/Settings';
+import Unlock from './pages/Unlock';
 import Verify from './pages/Verify';
 
 /**
@@ -39,6 +40,24 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Authenticated, and paid.
+ *
+ * Mirrors requirePaid on the API. The client gate exists so somebody who has
+ * not paid lands on the unlock page rather than on a workspace that answers
+ * every request with a 402 — but it is a courtesy, not the control. The server
+ * refuses regardless of what this component decides.
+ *
+ * A platform operator passes, matching the middleware.
+ */
+function RequirePaid({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <PageSpinner />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.unlockedAt && !user.isPlatformAdmin) return <Navigate to="/unlock" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -47,9 +66,13 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
-      <Route path="/organisations" element={<RequireAuth><Organisations /></RequireAuth>} />
+      {/* Behind the sign-in, in front of the paywall — it is where an unpaid
+          account is sent, so gating it on payment would be a closed loop. */}
+      <Route path="/unlock" element={<RequireAuth><Unlock /></RequireAuth>} />
 
-      <Route path="/o/:slug" element={<RequireAuth><Layout /></RequireAuth>}>
+      <Route path="/organisations" element={<RequirePaid><Organisations /></RequirePaid>} />
+
+      <Route path="/o/:slug" element={<RequirePaid><Layout /></RequirePaid>}>
         <Route index element={<Dashboard />} />
         <Route path="new" element={<Builder />} />
         <Route path="settings" element={<Settings />} />

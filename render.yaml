@@ -36,3 +36,19 @@ services:
       # Where QR codes point — the frontend's public origin.
       - key: PUBLIC_URL
         sync: false
+
+      # Paid access. Funds go straight to these wallets; the API only watches
+      # public explorers for incoming transfers and never holds a key.
+      #
+      # USDT_TRON_ADDRESS must be a Tron (TRC-20) address. The watcher filters
+      # on the TRC-20 USDT contract, so an address for any other chain will
+      # never match and every payment to it is lost to the payer.
+      - key: UNLOCK_PRICE_USD
+        value: "49"
+      - key: BTC_ADDRESS
+        sync: false
+      - key: USDT_TRON_ADDRESS
+        sync: false
+      # Optional — raises the TronGrid rate limit.
+      - key: TRONGRID_API_KEY
+        sync: false

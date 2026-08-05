@@ -103,6 +103,15 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
     }
   }
 
+  /*
+   * A 402 anywhere means this account has not paid. Sent to the unlock page
+   * from here rather than handled per call site: the alternative is every
+   * fetch in the app growing its own copy of the same redirect.
+   */
+  if (res.status === 402 && !window.location.pathname.startsWith('/unlock')) {
+    window.location.assign('/unlock');
+  }
+
   if (res.status === 204) return undefined as T;
 
   const data = await res.json().catch(() => ({}));

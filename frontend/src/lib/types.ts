@@ -8,6 +8,8 @@ export interface User {
   name: string;
   emailVerified: boolean;
   isPlatformAdmin: boolean;
+  /** When this account paid for access. Null means it has not. */
+  unlockedAt?: string | null;
   createdAt?: string;
 }
 

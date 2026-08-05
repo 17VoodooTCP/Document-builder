@@ -22,7 +22,13 @@ async function authenticate(req, res, next) {
     const { userId } = verifyAccess(token);
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, name: true, isPlatformAdmin: true, emailVerified: true },
+      select: {
+        id: true, email: true, name: true,
+        isPlatformAdmin: true, emailVerified: true,
+        /* Carried so /auth/me can tell the client whether to show the
+           workspace or the unlock page. */
+        unlockedAt: true,
+      },
     });
     if (!user) return res.status(401).json({ error: 'Not signed in.' });
 

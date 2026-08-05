@@ -71,6 +71,7 @@ app.use(limiter);
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/auth', require('./routes/auth'));
+app.use('/payments', require('./routes/payments'));
 app.use('/organisations', require('./routes/organisations'));
 app.use('/documents', require('./routes/documents'));
 app.use('/verify', require('./routes/verify'));

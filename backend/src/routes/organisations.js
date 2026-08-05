@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../utils/prisma');
 const { ingest, AssetError } = require('../utils/assets');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { requirePaid } = require('../middleware/paywall');
 
 const router = express.Router();
 
@@ -24,6 +25,7 @@ const router = express.Router();
  */
 
 router.use(authenticate);
+router.use(requirePaid);
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 
