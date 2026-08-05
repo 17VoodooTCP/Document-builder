@@ -1,4 +1,9 @@
 const prisma = require('../utils/prisma');
+const { settings } = require('../utils/settings');
+
+/* Logged once per process. A warning on every request would bury the rest of
+   the log under it, and it is a state, not an event. */
+let warnedOpen = false;
 
 /**
  * The gate.
@@ -27,6 +32,34 @@ async function requirePaid(req, res, next) {
   if (req.user.isPlatformAdmin) return next();
 
   try {
+    /*
+     * If nothing can be paid with, nothing is charged for.
+     *
+     * A deployment with no receiving address on either chain cannot take a
+     * payment — the unlock screen offers both assets as unavailable and there
+     * is no path through it. Enforcing the gate in that state locks every
+     * account out of a working product, permanently, with no action available
+     * to anybody: not the customer, who cannot pay, and not the operator, who
+     * may be the one locked out.
+     *
+     * That is a misconfiguration rather than a business decision, so it fails
+     * open and says so in the log. It is a narrow exception — a single
+     * configured address on either chain closes the gate again — and it is
+     * worth the small risk of an unbilled hour against the certainty of a
+     * total lockout the first time this ships ahead of its wallets.
+     */
+    const config = await settings();
+    if (!config.btcAddress && !config.usdtTronAddress) {
+      if (!warnedOpen) {
+        warnedOpen = true;
+        console.warn(
+          '[paywall] No receiving address configured on either chain. Access is ' +
+          'open until one is set at /admin or in the environment.',
+        );
+      }
+      return next();
+    }
+
     /*
      * Read fresh rather than trusting the token or the object authenticate
      * populated. Access is granted by a chain watcher that may have run a
