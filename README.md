@@ -113,6 +113,7 @@ npm run dev
 | `BTC_ADDRESS` | backend | Your Bitcoin receiving address. |
 | `USDT_TRON_ADDRESS` | backend | Your **Tron (TRC-20)** USDT address. Any other chain will never match. |
 | `TRONGRID_API_KEY` | backend | Optional. Raises the TronGrid rate limit. |
+| `PLATFORM_ADMIN_EMAILS` | backend | Comma-separated. Grants the operator flag, which bypasses the paywall and opens `/admin`. **Set one before deploying the paywall** or everybody is locked out. |
 
 ### Deployment notes
 
@@ -202,6 +203,28 @@ recipient who scans a code on a letter is not a customer, has no account, and
 has no idea this platform exists. Gating that would break the promise the
 document makes on its own face — and break it for every code already printed,
 including ones issued while the tenant was paying.
+
+### Where the wallets are configured
+
+`/admin`, by a platform operator. The addresses live on a `PlatformSettings`
+row so they can be rotated without a redeploy — the environment variables remain
+the fallback and are used when a field is blank, so an existing deployment keeps
+working and a fresh one can be set up either way.
+
+Nothing secret is stored. A receiving address is public by construction, and no
+private key, seed or mnemonic exists anywhere in this codebase — which is why
+this application can never move a customer's money, or its own. The worst an
+attacker with the console could do is redirect *future* payments, which is why
+it is operator-only and every save records who made it.
+
+Addresses are echoed back in full rather than masked. An address you cannot read
+is one you cannot check, and one wrong character sends a payment somewhere
+neither party can reach.
+
+Payment QR codes are optional. A correct code is generated from the address on
+its own; an upload only earns its place where a wallet issues a code carrying
+something extra — a memo, a payment id — that a generated one would drop. The
+address is printed beneath either way, so a payer can check the two agree.
 
 ### The trap in this feature, twice
 

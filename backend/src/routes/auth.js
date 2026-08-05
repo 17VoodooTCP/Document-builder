@@ -65,6 +65,34 @@ const DECOY_HASH = bcrypt.hashSync('no-such-account-placeholder', 10);
 
 const BCRYPT_ROUNDS = 12;
 
+/**
+ * Platform operators, named in the environment.
+ *
+ * There is otherwise no way for the first one to exist: the flag lives on a
+ * row, and nothing in the application can set it without already holding it.
+ * A signup endpoint that granted it would be a back door, and a seed script is
+ * one more thing to run by hand on a platform whose shell is not always to hand.
+ *
+ * Reconciled on every sign-in rather than only at registration, so removing an
+ * address from the list takes the privilege away at their next login instead of
+ * leaving it set on a row forever.
+ */
+const operatorEmails = () =>
+  (process.env.PLATFORM_ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+async function reconcileOperator(record) {
+  const shouldBe = operatorEmails().includes(String(record.email).toLowerCase());
+  if (shouldBe === !!record.isPlatformAdmin) return record.isPlatformAdmin;
+  await prisma.user.update({
+    where: { id: record.id },
+    data: { isPlatformAdmin: shouldBe },
+  }).catch(() => {});
+  return shouldBe;
+}
+
 /** Everything the client is told about itself. Never the password hash. */
 const userShape = {
   id: true, email: true, name: true, emailVerified: true, isPlatformAdmin: true,
@@ -141,8 +169,10 @@ router.post('/register',
         select: userShape,
       });
 
+      const isPlatformAdmin = await reconcileOperator(user);
+
       const { accessToken } = issueSession(res, user.id);
-      res.status(201).json({ user, memberships: [], accessToken });
+      res.status(201).json({ user: { ...user, isPlatformAdmin }, memberships: [], accessToken });
     } catch (err) {
       /*
        * A taken address is reported plainly. The alternative — accepting the
@@ -187,6 +217,8 @@ router.post('/login',
         return res.status(401).json({ error: 'Those details do not match an account.' });
       }
 
+      const isPlatformAdmin = await reconcileOperator(record);
+
       const { accessToken } = issueSession(res, record.id);
       res.json({
         user: {
@@ -194,7 +226,7 @@ router.post('/login',
           email: record.email,
           name: record.name,
           emailVerified: record.emailVerified,
-          isPlatformAdmin: record.isPlatformAdmin,
+          isPlatformAdmin,
           unlockedAt: record.unlockedAt,
           createdAt: record.createdAt,
         },

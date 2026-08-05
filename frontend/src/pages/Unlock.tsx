@@ -43,10 +43,15 @@ interface Invoice {
   received: string | null;
   expiresAt: string;
   confirmedAt: string | null;
+  /** Uploaded by the operator. When present it replaces the generated code,
+      because theirs may carry a memo or payment id that ours would drop. */
+  qrImage: string | null;
 }
 
 interface Config {
   priceCents: number;
+  headline?: string;
+  note?: string;
   unlocked: boolean;
   assets: { asset: Asset; label: string; network: string; available: boolean }[];
 }
@@ -77,6 +82,7 @@ export default function Unlock() {
      address by hand is the most expensive error available on this page. */
   useEffect(() => {
     if (!invoice) { setQr(null); return; }
+    if (invoice.qrImage) { setQr(invoice.qrImage); return; }
     const uri = invoice.asset === 'BTC'
       ? `bitcoin:${invoice.address}?amount=${invoice.amount}`
       : invoice.address;
@@ -156,10 +162,13 @@ export default function Unlock() {
         </div>
 
         <div className="mb-6 text-center">
-          <h1 className="text-lg font-semibold tracking-tight text-white">Unlock Document Builder</h1>
+          <h1 className="text-lg font-semibold tracking-tight text-white">
+            {config?.headline || 'Unlock Document Builder'}
+          </h1>
           <p className="mt-1 text-sm text-slate-300">
             {config ? `${money(config.priceCents)} once. Not a subscription.` : 'Loading…'}
           </p>
+          {config?.note && <p className="mt-2 text-xs text-slate-400">{config.note}</p>}
         </div>
 
         <div className="rounded-lg bg-white p-6 shadow-2xl ring-1 ring-black/20">

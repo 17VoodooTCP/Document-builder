@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 
 const prisma = require('../utils/prisma');
 const { authenticate } = require('../middleware/auth');
+const { settings } = require('../utils/settings');
 const {
   ChainError, DECIMALS, BTC_MIN_CONFIRMATIONS,
   fromBaseUnits, usdRate, quote, check,
@@ -32,21 +33,15 @@ const router = express.Router();
  */
 
 const ASSETS = {
-  BTC: { chain: 'BITCOIN', label: 'Bitcoin', network: 'Bitcoin', env: 'BTC_ADDRESS' },
-  USDT: { chain: 'TRON', label: 'Tether', network: 'Tron (TRC-20)', env: 'USDT_TRON_ADDRESS' },
-};
-
-/** Default $49. Set UNLOCK_PRICE_USD to a plain dollar figure to change it. */
-const priceCents = () => {
-  const dollars = Number(process.env.UNLOCK_PRICE_USD || '49');
-  return Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : 4900;
+  BTC: { chain: 'BITCOIN', label: 'Bitcoin', network: 'Bitcoin', field: 'btcAddress', qr: 'btcQr' },
+  USDT: { chain: 'TRON', label: 'Tether', network: 'Tron (TRC-20)', field: 'usdtTronAddress', qr: 'usdtQr' },
 };
 
 /** How long a quote stands. Long enough to open a wallet, short enough that a
     pinned Bitcoin rate is not a free option on the operator at our expense. */
 const INVOICE_TTL_MS = 30 * 60 * 1000;
 
-const receivingAddress = (asset) => (process.env[ASSETS[asset].env] || '').trim();
+const receivingAddress = (config, asset) => String(config[ASSETS[asset].field] || '').trim();
 
 /* Raising invoices is cheap for us and free for a caller, so it is limited
    separately from the global allowance — an open endpoint that writes a row and
@@ -80,6 +75,9 @@ const shape = (p) => ({
   expiresAt: p.expiresAt,
   confirmedAt: p.confirmedAt,
   createdAt: p.createdAt,
+  /* Attached by the caller when the operator has uploaded one. Absent means
+     the client generates a code from the address, which is the default. */
+  qrImage: p.qrImage || null,
 });
 
 /**
@@ -90,17 +88,22 @@ const shape = (p) => ({
  * step — an invoice that cannot be paid is worse than a button that is not
  * there.
  */
-router.get('/config', (req, res) => {
-  res.json({
-    priceCents: priceCents(),
-    unlocked: !!req.user.unlockedAt,
-    assets: Object.entries(ASSETS).map(([asset, meta]) => ({
-      asset,
-      label: meta.label,
-      network: meta.network,
-      available: !!receivingAddress(asset),
-    })),
-  });
+router.get('/config', async (req, res, next) => {
+  try {
+    const config = await settings();
+    res.json({
+      priceCents: config.priceCents,
+      headline: config.offerHeadline,
+      note: config.offerNote,
+      unlocked: !!req.user.unlockedAt,
+      assets: Object.entries(ASSETS).map(([asset, meta]) => ({
+        asset,
+        label: meta.label,
+        network: meta.network,
+        available: !!receivingAddress(config, asset),
+      })),
+    });
+  } catch (err) { next(err); }
 });
 
 /**
@@ -119,7 +122,8 @@ router.post('/invoice', invoiceLimiter, async (req, res, next) => {
     return res.status(409).json({ error: 'This account already has access.' });
   }
 
-  const address = receivingAddress(asset);
+  const config = await settings();
+  const address = receivingAddress(config, asset);
   if (!address) {
     return res.status(503).json({
       error: `${ASSETS[asset].label} is not accepted yet — no receiving address is configured.`,
@@ -135,9 +139,10 @@ router.post('/invoice', invoiceLimiter, async (req, res, next) => {
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (open) return res.json({ payment: shape(open) });
+    const operatorQr = config[ASSETS[asset].qr] || null;
+    if (open) return res.json({ payment: shape({ ...open, qrImage: operatorQr }) });
 
-    const cents = priceCents();
+    const cents = config.priceCents;
     const rate = await usdRate(asset);
     const base = quote(cents, rate, asset);
 
@@ -185,7 +190,7 @@ router.post('/invoice', invoiceLimiter, async (req, res, next) => {
       },
     });
 
-    res.status(201).json({ payment: shape(payment) });
+    res.status(201).json({ payment: shape({ ...payment, qrImage: operatorQr }) });
   } catch (err) {
     if (err instanceof ChainError) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -247,7 +252,11 @@ router.get('/:id', async (req, res, next) => {
       unlocked = await isUnlocked(req.user.id);
     }
 
-    res.json({ payment: shape(payment), unlocked });
+    const config = await settings();
+    res.json({
+      payment: shape({ ...payment, qrImage: config[ASSETS[payment.asset]?.qr] || null }),
+      unlocked,
+    });
   } catch (err) { next(err); }
 });
 

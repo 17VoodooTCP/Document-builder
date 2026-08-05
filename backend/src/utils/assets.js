@@ -26,6 +26,12 @@ const PROFILES = {
   seal: { width: 900, height: 900, fit: 'inside', quality: 86, maxKb: 400 },
   /* A facsimile signature, usually a scan with a white background. */
   signature: { width: 700, height: 300, fit: 'inside', quality: 88, maxKb: 160 },
+  /* An operator-supplied payment QR code.
+     Quality is pinned high and the box is generous because this one is read by
+     a camera rather than by a person: re-encoding a QR too hard closes up the
+     quiet zones between modules and produces a code that looks perfect and
+     scans on nothing. */
+  qr: { width: 900, height: 900, fit: 'inside', quality: 96, maxKb: 320 },
 };
 
 const DATA_URL = /^data:(image\/(png|jpe?g|webp|gif|avif));base64,([A-Za-z0-9+/=]+)$/;

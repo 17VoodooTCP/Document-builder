@@ -232,3 +232,162 @@ body {
     transform: none;
   }
 }
+
+/*
+ * The workspace, in operations dress.
+ *
+ * ── Why the chrome went dark, and what that does not change ───────────────
+ *
+ * The rule this codebase runs on is that the platform has no identity of its
+ * own, so the only thing on screen wearing a brand is the tenant's document.
+ * A dark shell does not break that rule — it strengthens it. Charcoal is the
+ * absence of a colour choice, and it makes the sheet in the middle of the
+ * builder read as what it is: a piece of white paper on a desk, lit.
+ *
+ * The one coloured thing in here is the tenant's own accent, carried in on
+ * --org-accent and used only for state — an active tab, a live indicator. The
+ * platform still picks nothing.
+ */
+
+.ops {
+  --ops-line: rgb(30 41 59 / 0.9);
+  --org-accent: #64748b;
+  background-color: #060911;
+  color: #e2e8f0;
+  position: relative;
+  isolation: isolate;
+}
+
+/*
+ * The survey grid.
+ *
+ * Fixed rather than scrolled, so it reads as a surface the content moves over
+ * instead of wallpaper glued to it. Fine enough to be felt rather than seen —
+ * at this contrast it registers as texture, and anything heavier competes with
+ * the data sitting on top.
+ */
+.ops::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(148 163 184 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / 0.045) 1px, transparent 1px);
+  background-size: 46px 46px;
+}
+
+/* A slow vignette, so the edges fall away and the middle of the screen is
+   where the eye lands. */
+.ops::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 38%, transparent 42%, rgb(2 4 10 / 0.92) 100%);
+}
+
+/*
+ * The organisation's mark, struck across the middle of the workspace.
+ *
+ * Set as a background image on a fixed layer rather than an <img>, so it never
+ * enters the accessibility tree, never intercepts a click, and never scrolls
+ * with the content. It is furniture — the badge stencilled on the floor of the
+ * room, not a logo in a header — which is why it sits at four percent and
+ * behind everything.
+ */
+.ops-badge {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-position: center 46%;
+  background-size: min(46vw, 460px) auto;
+  opacity: 0.04;
+  filter: grayscale(1) contrast(1.15);
+}
+
+/* Corner brackets. The detail that says "instrument" rather than "web page",
+   and the cheapest way to get it: two gradients per corner, no extra markup. */
+.ops-panel {
+  position: relative;
+  background: rgb(9 14 26 / 0.72);
+  border: 1px solid var(--ops-line);
+  backdrop-filter: blur(2px);
+}
+
+.ops-panel::before,
+.ops-panel::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  border-color: var(--org-accent);
+  opacity: 0.7;
+}
+
+.ops-panel::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+
+.ops-panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid;
+  border-right: 2px solid;
+}
+
+/* Micro-labels. Mono, letterspaced, small — read as instrument legends rather
+   than as prose, which is what lets the data itself carry the page. */
+.ops-legend {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgb(100 116 139);
+}
+
+/* A live indicator, in the tenant's accent. Pulses slowly; stopped for anyone
+   who has asked for less movement. */
+.ops-live {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--org-accent);
+  box-shadow: 0 0 0 0 var(--org-accent);
+  animation: ops-pulse 2.4s ease-out infinite;
+}
+
+@keyframes ops-pulse {
+  0%   { box-shadow: 0 0 0 0 rgb(255 255 255 / 0.35); }
+  70%  { box-shadow: 0 0 0 7px rgb(255 255 255 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(255 255 255 / 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-live { animation: none; }
+}
+
+/* The sheet keeps its own light. A white page on a dark desk needs a real
+   shadow under it or it reads as a hole cut in the screen. */
+.ops .sheet {
+  box-shadow:
+    0 0 0 1px rgb(148 163 184 / 0.12),
+    0 24px 60px -12px rgb(0 0 0 / 0.85);
+}
+
+@media print {
+  .ops::before,
+  .ops::after,
+  .ops-badge {
+    display: none !important;
+  }
+}

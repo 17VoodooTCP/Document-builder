@@ -109,6 +109,52 @@ model User {
   payments      Payment[]
 }
 
+/// Platform configuration a platform operator can change without a redeploy.
+///
+/// A single row. Wallet addresses started life as environment variables, which
+/// is fine until the person who needs to rotate one is the person who cannot
+/// reach the Render dashboard at eleven at night. Editing a row is also
+/// auditable in a way that editing an env var is not.
+///
+/// Environment variables remain the fallback and are read when a field here is
+/// blank, so an existing deployment keeps working and a fresh one can be
+/// configured either way.
+///
+/// Nothing secret lives here. A receiving address is public by construction —
+/// it is what you hand to somebody so they can pay you — and no private key,
+/// seed or mnemonic is stored by this application anywhere, which is why it can
+/// never move a customer's money or its own.
+model PlatformSettings {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Always "singleton". Unique, so a second row cannot be created by a race
+  /// and then silently disagree with the first.
+  key               String   @unique @default("singleton")
+
+  /// Price of the one-off unlock, in US cents.
+  priceCents        Int      @default(4900)
+
+  btcAddress        String   @default("")
+  usdtTronAddress   String   @default("")
+
+  /// Operator-supplied payment QR codes, as data URLs.
+  ///
+  /// The application generates a correct QR from the address on its own. These
+  /// exist because a wallet or exchange sometimes issues a code carrying more
+  /// than an address — a memo, a payment id, an amount — and a generated code
+  /// would quietly drop it. When one is uploaded it is shown instead, and the
+  /// address is still printed beneath it so a payer can check the two agree.
+  btcQr             String?
+  usdtQr            String?
+
+  /// Shown on the unlock screen above the price.
+  offerHeadline     String   @default("")
+  offerNote         String   @default("")
+
+  updatedBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 /// An invoice, and the chain watching that settles it.
 ///
 /// ── How a payment is matched ──────────────────────────────────────────────

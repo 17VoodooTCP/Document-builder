@@ -52,3 +52,10 @@ services:
       # Optional — raises the TronGrid rate limit.
       - key: TRONGRID_API_KEY
         sync: false
+
+      # Comma-separated addresses that get the platform operator flag. Set at
+      # least one before this deploys, or the paywall locks everybody out —
+      # including you — with no way in. Operators bypass it and configure the
+      # wallets at /admin.
+      - key: PLATFORM_ADMIN_EMAILS
+        sync: false

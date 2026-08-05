@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import Layout from './components/Layout';
 import { PageSpinner } from './components/ui';
 import { useAuth } from './lib/auth';
+import Admin from './pages/Admin';
 import Builder from './pages/Builder';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
@@ -69,6 +70,11 @@ export default function App() {
       {/* Behind the sign-in, in front of the paywall — it is where an unpaid
           account is sent, so gating it on payment would be a closed loop. */}
       <Route path="/unlock" element={<RequireAuth><Unlock /></RequireAuth>} />
+
+      {/* Operator console. Outside the paywall on purpose — the person who
+          configures the wallets cannot be gated behind the payments they are
+          configuring. The API answers 404 to anybody who is not an operator. */}
+      <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
 
       <Route path="/organisations" element={<RequirePaid><Organisations /></RequirePaid>} />
 
