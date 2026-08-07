@@ -4,7 +4,9 @@ import Layout from './components/Layout';
 import { PageSpinner } from './components/ui';
 import { useAuth } from './lib/auth';
 import Admin from './pages/Admin';
+import Billing from './pages/Billing';
 import Builder from './pages/Builder';
+import Contracts from './pages/Contracts';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import NotFound from './pages/NotFound';
@@ -92,6 +94,11 @@ export default function App() {
       <Route path="/o/:slug" element={<RequirePaid><Layout /></RequirePaid>}>
         <Route index element={<Dashboard />} />
         <Route path="new" element={<Builder />} />
+        {/* Billing & Invoice Studio. Its own page and its own state; it shares
+            the register, the verification portal and the sheet furniture, and
+            touches nothing the Letter Builder owns. */}
+        <Route path="billing" element={<Billing />} />
+        <Route path="contracts" element={<Contracts />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 

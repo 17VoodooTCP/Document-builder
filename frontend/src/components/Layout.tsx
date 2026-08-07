@@ -128,15 +128,24 @@ export default function Layout() {
           </div>
         </div>
 
-        <nav className="mx-auto flex max-w-7xl items-center gap-7 border-t border-slate-800/60 px-4 sm:px-6">
+        {/*
+          Documents, as a row of studios rather than a single "new document".
+
+          Each is its own builder over the same register: a letter, a commercial
+          document, a contract. Grouped here so the shared thing — the register
+          they all issue into — reads as the spine it is.
+        */}
+        <nav className="mx-auto flex max-w-7xl items-center gap-7 overflow-x-auto border-t border-slate-800/60 px-4 sm:px-6">
           <Tab to={`/o/${slug}`} end>Register</Tab>
           {/* Hidden from a VIEWER because the API would refuse them. Offering a
               control whose only outcome is a 403 is a worse answer than not
               offering it. */}
-          {atLeast(role, 'ISSUER') && <Tab to={`/o/${slug}/new`}>New document</Tab>}
+          {atLeast(role, 'ISSUER') && <Tab to={`/o/${slug}/new`}>Letter builder</Tab>}
+          {atLeast(role, 'ISSUER') && <Tab to={`/o/${slug}/contracts`}>Contracts</Tab>}
+          {atLeast(role, 'ISSUER') && <Tab to={`/o/${slug}/billing`}>Billing &amp; invoices</Tab>}
           {atLeast(role, 'OWNER') && <Tab to={`/o/${slug}/settings`}>Identity</Tab>}
 
-          <span className="ops-legend ml-auto hidden py-3 sm:block">
+          <span className="ops-legend ml-auto hidden shrink-0 py-3 sm:block">
             {role || '—'}
           </span>
         </nav>

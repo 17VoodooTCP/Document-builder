@@ -110,6 +110,13 @@ export async function downloadPdf(el: HTMLElement, filename: string, meta: PdfMe
       doc.querySelectorAll<HTMLElement>('.sheet-fit').forEach((n) => {
         n.style.height = 'auto';
       });
+      /* Multi-page documents stack their sheets with a gap so the preview
+         reads as separate pages. In the capture that gap would push every page
+         after the first off its boundary, so it is closed here. */
+      doc.querySelectorAll<HTMLElement>('.sheet-stack').forEach((n) => {
+        n.style.gap = '0';
+      });
+
       doc.querySelectorAll<HTMLElement>('.sheet').forEach((n) => {
         /* The drop shadow is chrome for the preview. On paper it would print as
            a grey smear down two edges. */

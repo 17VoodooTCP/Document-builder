@@ -47,6 +47,30 @@ body {
 }
 
 /*
+ * A stack of pages.
+ *
+ * The gap is screen furniture only. For capture and for print the sheets sit
+ * flush, each exactly 297mm — which is what lets the PDF exporter's existing
+ * A4 slicer cut precisely on the page boundaries with no knowledge that a
+ * document might have more than one page.
+ */
+.sheet-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10mm;
+}
+
+.sheet-stack--flush {
+  gap: 0;
+}
+
+@media print {
+  .sheet-stack {
+    gap: 0;
+  }
+}
+
+/*
  * The document's typeface, chosen per document and handed down from the sheet
  * as two custom properties.
  *
