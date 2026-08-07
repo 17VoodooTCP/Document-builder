@@ -271,33 +271,56 @@ export default function DocumentSheet({
             The classification, set vertically down the left edge. It is what
             survives a document being read in a stack — the only thing legible
             when the page is half under another one. */}
-        {f.marginRule && draft.classification && (
-          <div
-            className="pointer-events-none absolute flex flex-col items-center"
-            /*
-              Centred in the gutter, not pushed to one side of it.
+        {f.marginRule && draft.classification && (() => {
+          /*
+           * Drawn as SVG, not as CSS `writing-mode`.
+           *
+           * html2canvas does not implement writing-mode. It laid the string out
+           * horizontally and then applied the 180-degree rotation that makes
+           * vertical-rl read bottom-to-top — so the marking came out of the PDF
+           * upside down and mirrored, while looking perfectly correct on screen.
+           * The same trap as the foil strip, and the same answer: SVG is
+           * serialised and rasterised by the browser itself, so the capture gets
+           * exactly what the preview shows.
+           *
+           * Ten units to the millimetre, and the viewBox keeps the strip's real
+           * 3mm x 132mm proportions, so preserveAspectRatio="none" scales
+           * without distorting the type.
+           */
+          const W = 30;
+          const H = 1320;
+          const FS = 19.4;
+          const label = draft.classification.toUpperCase();
+          /* The rules stop short of the text rather than running under it. */
+          const half = Math.min(H * 0.42, (label.length * FS * 0.85) / 2 + 40);
 
-              At 9mm it cleared the body text — 8mm of air on that side — but
-              sat 2.4mm off the inner frame rule, so it read as colliding with
-              the border instead. The gutter runs from the frame at 7.6mm to the
-              text at 21mm; this splits it, leaving about 5mm either side.
-            */
-            style={{ left: '12.8mm', width: '3mm', top: '95mm', bottom: '70mm' }}
-            aria-hidden="true"
-          >
-            <div style={{ width: '0.2mm', flex: 1, background: ink, opacity: 0.3 }} />
-            <span
-              className="font-sans uppercase"
-              style={{
-                writingMode: 'vertical-rl', transform: 'rotate(180deg)',
-                fontSize: '5.5pt', letterSpacing: '0.3em', padding: '3mm 0', opacity: 0.55,
-              }}
+          return (
+            <div
+              className="pointer-events-none absolute"
+              style={{ left: '12.8mm', width: '3mm', top: '95mm', bottom: '70mm' }}
+              aria-hidden="true"
             >
-              {draft.classification}
-            </span>
-            <div style={{ width: '0.2mm', flex: 1, background: ink, opacity: 0.3 }} />
-          </div>
-        )}
+              <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none" role="presentation">
+                <line x1={W / 2} y1={0} x2={W / 2} y2={H / 2 - half} stroke={ink} strokeWidth={2} opacity={0.3} />
+                <line x1={W / 2} y1={H / 2 + half} x2={W / 2} y2={H} stroke={ink} strokeWidth={2} opacity={0.3} />
+                <text
+                  x={W / 2}
+                  y={H / 2}
+                  fill={ink}
+                  opacity={0.55}
+                  fontSize={FS}
+                  letterSpacing={FS * 0.3}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily={face.chrome}
+                  transform={`rotate(-90 ${W / 2} ${H / 2})`}
+                >
+                  {label}
+                </text>
+              </svg>
+            </div>
+          );
+        })()}
 
         {/* ── Addressee ─────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-8" style={{ marginTop: '7mm' }}>

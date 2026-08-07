@@ -139,15 +139,15 @@ export function Signature({
      * proportion to whatever is actually resting on it: never stubbier than a
      * signature line should be, never running off toward the seal.
      */
-    <div style={{ width: 'fit-content', minWidth: '30mm', maxWidth: '46mm' }}>
-      <div style={{ height: '9mm' }} className="flex items-end overflow-hidden">
+    <div style={{ width: 'fit-content', minWidth: '34mm', maxWidth: '52mm' }}>
+      <div style={{ height: '11mm' }} className="flex items-end overflow-hidden">
         {image ? (
           <img
             src={image}
             alt=""
             aria-hidden="true"
             style={{
-              maxHeight: '9mm', maxWidth: '42mm',
+              maxHeight: '11mm', maxWidth: '48mm',
               /* Scans arrive as dark-on-white JPEGs. Multiply drops the white
                  so the stroke sits on the paper rather than in a grey box. */
               mixBlendMode: 'multiply',
@@ -165,8 +165,13 @@ export function Signature({
                * A pen signature on a letter is modest — it sits inside the
                * space above the rule with room to spare, because the person
                * signing was writing, not laying out a page.
+               *
+               * 18pt, not the 14pt this started at: measured against the
+               * export, the glyphs come through at exactly 1.00x screen size,
+               * so nothing was shrinking — 14pt was simply too small once it
+               * sat next to nine-point type on a printed page.
                */
-              fontSize: '14pt',
+              fontSize: '18pt',
               lineHeight: 1,
               color: ink,
               display: 'inline-block',
