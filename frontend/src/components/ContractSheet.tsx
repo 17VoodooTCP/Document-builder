@@ -326,20 +326,29 @@ function Clause({ n, section, accent }: {
   /* The clause's own colour when it has one, the tenant's accent otherwise. */
   const headColor = /^#[0-9a-f]{6}$/i.test(section.color || '') ? section.color : accent;
   return (
-    <section style={{ breakInside: 'avoid', paddingBottom: '4mm' }}>
+    <section style={{ breakInside: 'avoid', paddingBottom: '2.5mm' }}>
       <h2 className="font-sans text-[8pt] font-bold uppercase tracking-[0.12em]" style={{ color: headColor }}>
         <span className="font-mono" style={{ marginRight: '2.5mm' }}>{n}.</span>
         {section.heading || 'Untitled clause'}
       </h2>
       <div className="text-[8.5pt] leading-[1.65]" style={{ marginTop: '1.5mm', textAlign: 'justify', hyphens: 'auto' }}>
-        {paragraphs(section.body).map((p, i) => (
-          <p key={i} style={{ marginBottom: '2mm', whiteSpace: 'pre-line' }}>{p}</p>
-        ))}
-        {!section.body.trim() && !section.fields?.length && (
-          /* An empty clause prints its rule rather than nothing, so a printed
-             draft can be completed by hand without the numbering shifting. */
-          <div style={{ borderBottom: '0.2mm solid currentColor', opacity: 0.3, height: '4mm' }} />
-        )}
+        {(() => {
+          const ps = paragraphs(section.body);
+          return ps.map((p, i) => (
+            /* No margin under the last paragraph: it would stack on the
+               section's own padding and open a gap twice the size intended. */
+            <p key={i} style={{ marginBottom: i === ps.length - 1 ? 0 : '2mm', whiteSpace: 'pre-line' }}>{p}</p>
+          ));
+        })()}
+        {/*
+          An unwritten clause used to print a blank rule here, on the theory
+          that a printed draft could be completed by hand. It cost 4mm on every
+          clause nobody had filled in yet — 14mm per clause all told, and across
+          sixteen headings that is most of a page of nothing, which is exactly
+          how the first draft of an agreement looks. `ruledLines` still exists
+          for anyone who genuinely wants a rule; it is now asked for rather than
+          assumed.
+        */}
 
         {/*
           Particulars.
@@ -352,8 +361,12 @@ function Clause({ n, section, accent }: {
         */}
         {!!section.fields?.length && (
           <div style={{ marginTop: section.body.trim() ? '2.5mm' : 0 }}>
-            {section.fields.map((row) => (
-              <div key={row.id} className="flex items-baseline gap-2" style={{ marginBottom: '1.6mm' }}>
+            {section.fields.map((row, ri) => (
+              <div
+                key={row.id}
+                className="flex items-baseline gap-2"
+                style={{ marginBottom: ri === section.fields!.length - 1 ? 0 : '1.6mm' }}
+              >
                 <span className="shrink-0 font-sans text-[8pt] font-bold uppercase tracking-[0.04em]">
                   {row.label || 'Field'}:
                 </span>
@@ -369,10 +382,13 @@ function Clause({ n, section, accent }: {
         )}
         {/* Closing prose, under the particulars. */}
         {!!section.bodyAfter?.trim() && (
-          <div style={{ marginTop: '2.5mm' }}>
-            {paragraphs(section.bodyAfter).map((p, i) => (
-              <p key={i} style={{ marginBottom: '2mm', whiteSpace: 'pre-line' }}>{p}</p>
-            ))}
+          <div style={{ marginTop: '2mm' }}>
+            {(() => {
+              const ps = paragraphs(section.bodyAfter!);
+              return ps.map((p, i) => (
+                <p key={i} style={{ marginBottom: i === ps.length - 1 ? 0 : '2mm', whiteSpace: 'pre-line' }}>{p}</p>
+              ));
+            })()}
           </div>
         )}
 
