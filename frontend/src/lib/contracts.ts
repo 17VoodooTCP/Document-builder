@@ -14,13 +14,47 @@ export type ContractKind =
   | 'CONTRACTOR' | 'SERVICE' | 'EMPLOYMENT' | 'PURCHASE'
   | 'EQUIPMENT_RENTAL' | 'CONSULTING' | 'PARTNERSHIP' | 'GENERAL';
 
+/**
+ * A labelled fill-in row: `CONTRACT VALUE: ____________`.
+ *
+ * The rule runs whether or not a value is typed, so the same clause serves as
+ * a completed record and as a form to be filled in by hand — which is what a
+ * printed agreement is usually doing on the day it is signed.
+ */
+export interface FieldRow {
+  id: string;
+  label: string;
+  value: string;
+}
+
 /** One clause. `heading` is numbered by position, never stored. */
 export interface Section {
   id: string;
   heading: string;
+  /** Prose above the particulars — what is being agreed. */
   body: string;
-  /** Drawn as a run of underscores for signing or completion by hand. */
+  /** Particulars, printed between the two bodies as labelled rules. */
+  fields?: FieldRow[];
+  /**
+   * Prose below the particulars.
+   *
+   * A clause is rarely heading-then-rows-then-stop. It usually opens with a
+   * sentence, sets out the specifics, then closes with the conditions attached
+   * to them — and without somewhere to put that closing paragraph the document
+   * reads as a form rather than as an agreement.
+   */
+  bodyAfter?: string;
+  /** Blank ruled lines, for anything completed by hand. */
   ruledLines?: number;
+  /**
+   * Ink for this clause's heading, as a hex colour.
+   *
+   * Blank inherits the organisation's accent, which is the sane default — a
+   * document where every clause was coloured separately would be a ransom note.
+   * It is here because some agreements genuinely do colour-code sections, and
+   * the alternative was everything on the page being one flat black.
+   */
+  color?: string;
 }
 
 /** A party to the agreement, and the block they sign in. */
@@ -135,7 +169,23 @@ export const contractTemplate = (kind: ContractKind): ContractTemplate =>
 
 const id = () => Math.random().toString(36).slice(2, 10);
 
-export const blankSection = (heading = ''): Section => ({ id: id(), heading, body: '' });
+export const blankSection = (heading = ''): Section => ({ id: id(), heading, body: '', bodyAfter: '', fields: [] });
+
+export const blankField = (label = ''): FieldRow => ({ id: id(), label, value: '' });
+
+/**
+ * The particulars most agreements state as labelled rows rather than prose.
+ * Offered as a one-click block so an author does not type the same six labels
+ * into every contract they raise.
+ */
+export const PARTICULARS: string[] = [
+  'Type of contract',
+  'Contract reference number',
+  'Contract value',
+  'Site / location',
+  'Date of agreement',
+  'Duration',
+];
 
 export const blankParty = (role: string): ContractParty => ({
   id: id(), role, name: '', company: '', title: '', department: '',

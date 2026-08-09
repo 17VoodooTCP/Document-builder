@@ -315,10 +315,19 @@ export default function ContractSheet({
 
 /* ── Blocks ───────────────────────────────────────────────────────────────── */
 
-function Clause({ n, section, accent }: { n: number; section: { heading: string; body: string; ruledLines?: number }; accent: string }) {
+function Clause({ n, section, accent }: {
+  n: number;
+  section: {
+    heading: string; body: string; bodyAfter?: string; color?: string;
+    fields?: { id: string; label: string; value: string }[]; ruledLines?: number;
+  };
+  accent: string;
+}) {
+  /* The clause's own colour when it has one, the tenant's accent otherwise. */
+  const headColor = /^#[0-9a-f]{6}$/i.test(section.color || '') ? section.color : accent;
   return (
     <section style={{ breakInside: 'avoid', paddingBottom: '4mm' }}>
-      <h2 className="font-sans text-[8pt] font-bold uppercase tracking-[0.12em]" style={{ color: accent }}>
+      <h2 className="font-sans text-[8pt] font-bold uppercase tracking-[0.12em]" style={{ color: headColor }}>
         <span className="font-mono" style={{ marginRight: '2.5mm' }}>{n}.</span>
         {section.heading || 'Untitled clause'}
       </h2>
@@ -326,11 +335,47 @@ function Clause({ n, section, accent }: { n: number; section: { heading: string;
         {paragraphs(section.body).map((p, i) => (
           <p key={i} style={{ marginBottom: '2mm', whiteSpace: 'pre-line' }}>{p}</p>
         ))}
-        {!section.body.trim() && (
+        {!section.body.trim() && !section.fields?.length && (
           /* An empty clause prints its rule rather than nothing, so a printed
              draft can be completed by hand without the numbering shifting. */
           <div style={{ borderBottom: '0.2mm solid currentColor', opacity: 0.3, height: '4mm' }} />
         )}
+
+        {/*
+          Particulars.
+          
+          The rule runs the full remaining width whether or not a value is set,
+          so one template serves both as a completed record and as something
+          printed and filled in by hand at signing. The value sits *on* the rule
+          rather than above it, which is what makes it read as filled in rather
+          than as a caption.
+        */}
+        {!!section.fields?.length && (
+          <div style={{ marginTop: section.body.trim() ? '2.5mm' : 0 }}>
+            {section.fields.map((row) => (
+              <div key={row.id} className="flex items-baseline gap-2" style={{ marginBottom: '1.6mm' }}>
+                <span className="shrink-0 font-sans text-[8pt] font-bold uppercase tracking-[0.04em]">
+                  {row.label || 'Field'}:
+                </span>
+                <span
+                  className="min-w-0 flex-1 text-center font-semibold"
+                  style={{ borderBottom: '0.25mm solid currentColor', paddingBottom: '0.4mm' }}
+                >
+                  {row.value || ' '}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Closing prose, under the particulars. */}
+        {!!section.bodyAfter?.trim() && (
+          <div style={{ marginTop: '2.5mm' }}>
+            {paragraphs(section.bodyAfter).map((p, i) => (
+              <p key={i} style={{ marginBottom: '2mm', whiteSpace: 'pre-line' }}>{p}</p>
+            ))}
+          </div>
+        )}
+
         {Array.from({ length: section.ruledLines || 0 }).map((_, i) => (
           <div key={i} style={{ borderBottom: '0.2mm solid currentColor', opacity: 0.35, height: '5mm' }} />
         ))}
@@ -349,6 +394,9 @@ function Execution({ draft, org, accent, ink, authorizationId, signatureFor }: {
 }) {
   return (
     <section style={{ breakInside: 'avoid', paddingTop: '3mm' }}>
+      {/* The execution block always takes the tenant's accent. It is the one
+          heading that is structural rather than authored, so it is not offered
+          a colour of its own. */}
       <h2 className="font-sans text-[8pt] font-bold uppercase tracking-[0.12em]" style={{ color: accent }}>
         Execution
       </h2>

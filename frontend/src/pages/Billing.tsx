@@ -19,6 +19,7 @@ import InvoiceSheet from '../components/InvoiceSheet';
 import {
   Banner, Button, Card, Field, Input, Mono, PageSpinner, Select, Textarea, Toggle,
 } from '../components/ui';
+import SheetPreview from '../components/SheetPreview';
 
 /**
  * Billing & Invoice Studio.
@@ -29,8 +30,6 @@ import {
  * portal, so an invoice and a letter from the same organisation are equally
  * checkable by whoever receives them.
  */
-
-const A4_W = 793.7;
 
 const blank = (kind: BillingKind = 'INVOICE'): BillingDraft => ({
   kind,
@@ -502,7 +501,7 @@ export default function Billing() {
         </div>
 
         <div ref={sheetRef}>
-          <Preview>
+          <SheetPreview>
             <InvoiceSheet
               organisation={org}
               draft={doc}
@@ -514,7 +513,7 @@ export default function Billing() {
               signatureImage={chosen?.signature}
               onFit={setFit}
             />
-          </Preview>
+          </SheetPreview>
         </div>
       </div>
     </div>
@@ -615,36 +614,3 @@ function Sum({ label, children, strong }: { label: string; children: React.React
   );
 }
 
-/** Same scaling wrapper the Letter Builder uses: the sheet is laid out in
-    millimetres and must stay that way, so it is scaled by transform. */
-function Preview({ children }: { children: React.ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
-  const [height, setHeight] = useState(1122.5);
-
-  useEffect(() => {
-    const outer = box.current;
-    if (!outer) return;
-    const measure = () => {
-      setScale(Math.min(1, outer.clientWidth / A4_W));
-      const sheet = outer.querySelector<HTMLElement>('.sheet');
-      if (sheet) setHeight(sheet.offsetHeight);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(outer);
-    const sheet = outer.querySelector('.sheet');
-    if (sheet) ro.observe(sheet);
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div ref={box}>
-      <div style={{ height: `${height * scale}px` }} className="sheet-fit">
-        <div className="sheet-scale" style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: `${A4_W}px` }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}

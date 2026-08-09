@@ -6,8 +6,8 @@ import { verifyUrl } from '../lib/qr';
 import { downloadPdf, pdfFilename } from '../lib/pdf';
 import { FOILS, TYPEFACES } from '../lib/typefaces';
 import {
-  blankParty, blankSection, CONTRACT_STATUS_LABEL, CONTRACT_TEMPLATES,
-  contractTemplate, newContract,
+  blankField, blankParty, blankSection, CONTRACT_STATUS_LABEL, CONTRACT_TEMPLATES,
+  contractTemplate, newContract, PARTICULARS,
   type ContractDraft, type ContractKind, type ContractStatus,
 } from '../lib/contracts';
 import type { Draft, IssuedDocument, Organisation, Signatory } from '../lib/types';
@@ -15,6 +15,7 @@ import ContractSheet from '../components/ContractSheet';
 import {
   Banner, Button, Card, Field, Input, Mono, PageSpinner, Select, Textarea, Toggle,
 } from '../components/ui';
+import SheetPreview from '../components/SheetPreview';
 
 /**
  * Agreement Studio.
@@ -24,8 +25,6 @@ import {
  * Billing Studio; issues into the same register and verifies through the same
  * portal as both.
  */
-
-const A4_W = 793.7;
 
 export default function Contracts() {
   const { slug = '' } = useParams();
@@ -317,8 +316,110 @@ export default function Contracts() {
                   value={s.body}
                   onChange={(e) => mutSections((a) => { a[i] = { ...a[i], body: e.target.value }; return a; })}
                 />
+
+                {/*
+                  Particulars: labelled rows that print as `LABEL: ______value______`.
+
+                  These sit under the prose rather than replacing it, which is
+                  the shape most agreements actually take — a paragraph stating
+                  what was agreed, then the specifics set out on rules that can
+                  equally be completed by hand after printing.
+                */}
+                {!!s.fields?.length && (
+                  <div className="mt-2 space-y-1.5 rounded bg-slate-50 p-2">
+                    {s.fields.map((row, fi) => (
+                      <div key={row.id} className="flex items-center gap-1.5">
+                        <input
+                          value={row.label}
+                          placeholder="Label"
+                          onChange={(e) => mutSections((a) => {
+                            const fields = [...(a[i].fields || [])];
+                            fields[fi] = { ...fields[fi], label: e.target.value };
+                            a[i] = { ...a[i], fields }; return a;
+                          })}
+                          className="w-[38%] rounded border-0 bg-white px-2 py-1 text-xs font-semibold uppercase ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-slate-900"
+                        />
+                        <input
+                          value={row.value}
+                          placeholder="Value — leave blank for a rule to fill in by hand"
+                          onChange={(e) => mutSections((a) => {
+                            const fields = [...(a[i].fields || [])];
+                            fields[fi] = { ...fields[fi], value: e.target.value };
+                            a[i] = { ...a[i], fields }; return a;
+                          })}
+                          className="min-w-0 flex-1 rounded border-0 bg-white px-2 py-1 text-xs ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-slate-900"
+                        />
+                        <Mini
+                          label="Remove field"
+                          onClick={() => mutSections((a) => {
+                            a[i] = { ...a[i], fields: (a[i].fields || []).filter((_, n) => n !== fi) };
+                            return a;
+                          })}
+                        >✕</Mini>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Closing prose, printed under the particulars — the
+                    conditions attached to what the rows just set out. */}
+                <Textarea
+                  rows={3}
+                  className="mt-2"
+                  placeholder="Closing text, printed below the fill-in rows."
+                  value={s.bodyAfter || ''}
+                  onChange={(e) => mutSections((a) => { a[i] = { ...a[i], bodyAfter: e.target.value }; return a; })}
+                />
+
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => mutSections((a) => {
+                      a[i] = { ...a[i], fields: [...(a[i].fields || []), blankField()] };
+                      return a;
+                    })}
+                    className="rounded px-2 py-1 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50"
+                  >
+                    + Fill-in row
+                  </button>
+                  {!s.fields?.length && (
+                    <button
+                      type="button"
+                      onClick={() => mutSections((a) => {
+                        a[i] = { ...a[i], fields: PARTICULARS.map((l) => blankField(l)) };
+                        return a;
+                      })}
+                      className="rounded px-2 py-1 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50"
+                    >
+                      + Standard particulars
+                    </button>
+                  )}
+                  {/* Heading colour. Blank inherits the organisation's accent,
+                      which is what nearly every clause should use — the control
+                      is here for the few that genuinely colour-code. */}
+                  <span className="ml-auto flex items-center gap-1">
+                    <input
+                      type="color"
+                      aria-label="Heading colour"
+                      title="Heading colour"
+                      value={/^#[0-9a-f]{6}$/i.test(s.color || '') ? s.color : '#0F5F5C'}
+                      onChange={(e) => mutSections((a) => { a[i] = { ...a[i], color: e.target.value.toUpperCase() }; return a; })}
+                      className="h-6 w-8 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+                    />
+                    {s.color && (
+                      <button
+                        type="button"
+                        onClick={() => mutSections((a) => { a[i] = { ...a[i], color: '' }; return a; })}
+                        className="text-[10px] text-slate-500 underline underline-offset-2 hover:text-slate-900"
+                      >
+                        reset
+                      </button>
+                    )}
+                  </span>
+                </div>
+
                 {!!s.ruledLines && (
-                  <p className="mt-1 text-xs text-slate-500">{s.ruledLines} ruled line{s.ruledLines === 1 ? '' : 's'} for completion by hand.</p>
+                  <p className="mt-1 text-xs text-slate-500">{s.ruledLines} blank ruled line{s.ruledLines === 1 ? '' : 's'} for completion by hand.</p>
                 )}
               </div>
             ))}
@@ -397,7 +498,7 @@ export default function Contracts() {
         </div>
 
         <div ref={sheetRef}>
-          <Preview>
+          <SheetPreview>
             <ContractSheet
               organisation={org}
               draft={doc}
@@ -409,7 +510,7 @@ export default function Contracts() {
               signatureFor={sigFor}
               onPages={setPageCount}
             />
-          </Preview>
+          </SheetPreview>
         </div>
       </div>
     </div>
@@ -463,35 +564,3 @@ function Mini({ children, label, onClick, disabled }: {
   );
 }
 
-/** Scales the whole stack, so a four-page agreement previews as four pages. */
-function Preview({ children }: { children: React.ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
-  const [height, setHeight] = useState(1122.5);
-
-  useEffect(() => {
-    const outer = box.current;
-    if (!outer) return;
-    const measure = () => {
-      setScale(Math.min(1, outer.clientWidth / A4_W));
-      const stack = outer.querySelector<HTMLElement>('.sheet-stack');
-      if (stack) setHeight(stack.offsetHeight);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(outer);
-    const stack = outer.querySelector('.sheet-stack');
-    if (stack) ro.observe(stack);
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div ref={box}>
-      <div style={{ height: `${height * scale}px` }} className="sheet-fit">
-        <div className="sheet-scale" style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: `${A4_W}px` }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
