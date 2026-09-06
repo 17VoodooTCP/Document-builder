@@ -148,9 +148,12 @@ export function Signature({
             aria-hidden="true"
             style={{
               maxHeight: '11mm', maxWidth: '48mm',
-              /* Scans arrive as dark-on-white JPEGs. Multiply drops the white
-                 so the stroke sits on the paper rather than in a grey box. */
-              mixBlendMode: 'multiply',
+               /* Scans arrive as dark-on-white JPEGs. Multiply drops the white
+                  so the stroke sits on the paper rather than in a grey box.
+                  The restrained blue-black treatment is the visual weight of an
+                  archival fountain-pen ink, rather than flat screen black. */
+               mixBlendMode: 'multiply',
+               filter: 'sepia(0.35) saturate(2.8) hue-rotate(176deg) brightness(0.62) contrast(1.18)',
             }}
           />
         ) : name ? (
@@ -173,7 +176,7 @@ export function Signature({
                */
               fontSize: '18pt',
               lineHeight: 1,
-              color: ink,
+               color: ink,
               display: 'inline-block',
               transform: `rotate(${tilt}deg)`,
               paddingBottom: '0.6mm',

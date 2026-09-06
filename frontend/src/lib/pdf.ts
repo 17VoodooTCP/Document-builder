@@ -32,6 +32,19 @@ export interface PdfMeta {
   title?: string;
   subject?: string;
   author?: string;
+  /** Ask the operating system for a destination/name before writing the file. */
+  saveWithPicker?: boolean;
+}
+
+interface SaveFileHandle {
+  createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }>;
+}
+
+interface PickerWindow extends Window {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<SaveFileHandle>;
 }
 
 export async function downloadPdf(el: HTMLElement, filename: string, meta: PdfMeta = {}) {
@@ -56,15 +69,25 @@ export async function downloadPdf(el: HTMLElement, filename: string, meta: PdfMe
    * The clone is what gets rendered — the live page is never touched, so
    * nothing flickers under the user while this runs.
    */
+  const sheets = el.matches('.sheet')
+    ? [el]
+    : Array.from(el.querySelectorAll<HTMLElement>('.sheet'));
+  /* The preview stack has a screen-only gap between pages. The clone closes it,
+     so the capture height must describe the flush A4 stack rather than the
+     taller preview box or the slicer can manufacture a blank final page. */
+  const captureHeight = sheets.length
+    ? sheets.reduce((total, sheet) => total + sheet.offsetHeight, 0)
+    : el.offsetHeight;
+
   const canvas = await html2canvas(el, {
     scale: CAPTURE_SCALE,
     backgroundColor: '#ffffff',
     useCORS: true,
     logging: false,
     width: el.offsetWidth,
-    height: el.offsetHeight,
+    height: captureHeight,
     windowWidth: el.offsetWidth,
-    windowHeight: el.offsetHeight,
+    windowHeight: captureHeight,
     onclone: (doc) => {
       /*
        * Carry the stylesheets into the clone as text.
@@ -176,8 +199,27 @@ export async function downloadPdf(el: HTMLElement, filename: string, meta: PdfMe
     pdf.addImage(image, 'JPEG', 0, 0, A4_W_MM, heightMm, undefined, 'FAST');
   }
 
+  const bytes = canvas.width * canvas.height;
+  const picker = (window as PickerWindow).showSaveFilePicker;
+  if (meta.saveWithPicker && picker) {
+    try {
+      const handle = await picker.call(window, {
+        suggestedName: filename,
+        types: [{ description: 'PDF document', accept: { 'application/pdf': ['.pdf'] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(pdf.output('blob'));
+      await writable.close();
+      return { pages, bytes };
+    } catch (err) {
+      /* Cancelling the save dialog is a normal user action, not a failed PDF. */
+      if (err instanceof DOMException && err.name === 'AbortError') return { pages, bytes, canceled: true };
+      throw err;
+    }
+  }
+
   pdf.save(filename);
-  return { pages, bytes: canvas.width * canvas.height };
+  return { pages, bytes };
 }
 
 /** `NWL-260804-FHXO.pdf` — the reference is what a reader will quote back. */

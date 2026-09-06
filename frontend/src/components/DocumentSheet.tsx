@@ -6,50 +6,20 @@ import { qrDataUrl, verifyUrl } from '../lib/qr';
 import { Guilloche, HoloStrip, Signature } from './Security';
 import { foil as foilFor, typeface as typefaceFor } from '../lib/typefaces';
 
-/**
- * The layout engine. One of it.
- *
- * The obvious shape for a document builder is a template per document type, and
- * it rots: five templates become five slightly different letterheads, and a
- * change to the footer is made four times out of five. So there is a single
- * sheet, and everything that varies is either identity (from the Organisation)
- * or a block that is drawn or not (from `features`).
- *
- * ── On what the furniture is allowed to say ───────────────────────────────
- *
- * The seal, the guilloché, the watermark, the frame and the microtext are
- * conventions. Nobody reads them as factual assertions and they can be as
- * elaborate as the design wants. A sentence is different: "digitally
- * authorized", "cryptographically verified", "this document has not been
- * altered" all name operations, and if the operation does not happen the
- * sentence is the one thing a recipient could later hold against the
- * organisation.
- *
- * So the wording says what actually happened — issued under a reference,
- * recorded on a register, carrying a control mark and a fingerprint the reader
- * can compare themselves — and it is set at exactly the weight a grander claim
- * would have had.
- */
-
 type Identity = PortalOrganisation & { watermark?: string | null };
+type PageBody = string[];
+type PageVariant = 'first' | 'continued';
 
 interface Props {
   organisation: Identity;
   draft: DocumentDraft;
   reference: string;
-  /** Stable id derived from the reference. Quoted in the footer and by the QR. */
   documentId: string;
   fingerprint: string;
   authorizationId: string;
   generatedAt?: string;
   signatureImage?: string | null;
-  /**
-   * Reports how the body was made to fit: the point size it settled at, and
-   * whether it still overran at the smallest size allowed. The builder turns
-   * that into a warning, because the one thing the sheet must not do is drop
-   * text quietly.
-   */
-  onFit?: (info: { pt: number; overflowing: boolean }) => void;
+  onFit?: (info: { pt: number; overflowing: boolean; pages: number }) => void;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -59,80 +29,111 @@ const KIND_LABEL: Record<string, string> = {
   STATEMENT: 'Statement',
 };
 
-export default function DocumentSheet({
-  organisation: org, draft, reference, documentId, fingerprint,
-  authorizationId, generatedAt, signatureImage, onFit,
-}: Props) {
+interface PageProps extends Props {
+  body: PageBody;
+  pageNumber: number;
+  pageCount: number;
+  variant: PageVariant;
+  showEndMatter: boolean;
+  bodyRef?: (node: HTMLDivElement | null) => void;
+  paginationKind?: string;
+}
+
+/** A stack of real A4 sheets; long correspondence is never clipped into one. */
+export default function DocumentSheet(props: Props) {
+  const bodyParagraphs = paragraphs(props.draft.body);
+  const [pageBodies, setPageBodies] = useState<PageBody[]>([bodyParagraphs]);
+  const firstFullRef = useRef<HTMLDivElement | null>(null);
+  const continuedFullRef = useRef<HTMLDivElement | null>(null);
+  const firstFinalRef = useRef<HTMLDivElement | null>(null);
+  const continuedFinalRef = useRef<HTMLDivElement | null>(null);
+  const lastLayout = useRef('');
+
+  const assign = (key: 'firstFull' | 'continuedFull' | 'firstFinal' | 'continuedFinal') =>
+    (node: HTMLDivElement | null) => {
+      if (key === 'firstFull') firstFullRef.current = node;
+      if (key === 'continuedFull') continuedFullRef.current = node;
+      if (key === 'firstFinal') firstFinalRef.current = node;
+      if (key === 'continuedFinal') continuedFinalRef.current = node;
+    };
+
+  useLayoutEffect(() => {
+    const capacities = {
+      firstFull: firstFullRef.current?.clientHeight || 0,
+      continuedFull: continuedFullRef.current?.clientHeight || 0,
+      firstFinal: firstFinalRef.current?.clientHeight || 0,
+      continuedFinal: continuedFinalRef.current?.clientHeight || 0,
+    };
+    if (!Object.values(capacities).every(Boolean)) return;
+
+    const next = paginateBody(bodyParagraphs, capacities);
+    const key = `${props.draft.body}\u0000${next.map((page) => page.join('\u0001')).join('\u0002')}\u0000${next.length}`;
+    if (key !== lastLayout.current) {
+      lastLayout.current = key;
+      setPageBodies((current) => samePages(current, next) ? current : next);
+      props.onFit?.({ pt: 9.5, overflowing: false, pages: next.length });
+    }
+  });
+
+  const pageCount = pageBodies.length;
+  const pageProps = (body: PageBody, pageNumber: number): PageProps => ({
+    ...props,
+    body,
+    pageNumber,
+    pageCount,
+    variant: pageNumber === 1 ? 'first' : 'continued',
+    showEndMatter: pageNumber === pageCount,
+  });
+
+  return (
+    <>
+      <div className="sheet-stack">
+        {pageBodies.map((body, index) => (
+          <DocumentPage key={`${index}-${body.join('|').length}`} {...pageProps(body, index + 1)} />
+        ))}
+      </div>
+
+      <div
+        className="sheet-pagination-probes"
+        aria-hidden="true"
+        style={{ position: 'absolute', left: '-100000px', top: 0, visibility: 'hidden', pointerEvents: 'none' }}
+      >
+        <DocumentPage {...pageProps(bodyParagraphs, 1)} variant="first" showEndMatter={false} bodyRef={assign('firstFull')} paginationKind="firstFull" />
+        <DocumentPage {...pageProps(bodyParagraphs, 2)} variant="continued" showEndMatter={false} bodyRef={assign('continuedFull')} paginationKind="continuedFull" />
+        <DocumentPage {...pageProps(bodyParagraphs, 1)} variant="first" showEndMatter bodyRef={assign('firstFinal')} paginationKind="firstFinal" />
+        <DocumentPage {...pageProps(bodyParagraphs, 2)} variant="continued" showEndMatter bodyRef={assign('continuedFinal')} paginationKind="continuedFinal" />
+      </div>
+    </>
+  );
+}
+
+function DocumentPage({
+  organisation: org, draft, reference, documentId, fingerprint, authorizationId,
+  generatedAt, signatureImage, body, pageNumber, pageCount, variant, showEndMatter, bodyRef, paginationKind,
+}: PageProps) {
   const accent = org.accentColor || '#0F5F5C';
   const ink = org.inkColor || '#1B2733';
   const f = draft.features;
   const foilSpec = foilFor(draft.foil);
   const face = typefaceFor(draft.typeface);
-
   const [qr, setQr] = useState<string | null>(null);
+  const continued = variant === 'continued';
+
   useEffect(() => {
     if (!f.qr || !reference) { setQr(null); return; }
     let live = true;
     qrDataUrl(verifyUrl(org.slug, reference))
       .then((url) => { if (live) setQr(url); })
-      /* A missing code leaves a labelled gap rather than an exception. The rest
-         of the document is still worth printing. */
       .catch(() => { if (live) setQr(null); });
     return () => { live = false; };
   }, [f.qr, org.slug, reference]);
 
-  /*
-   * Shrink-to-fit for the body copy.
-   *
-   * Everything else on the page is fixed furniture — letterhead, signature
-   * block, verification panel — so the body is the only thing that can give.
-   * It is stepped down from 9.5pt in tenths until it clears, with a floor at
-   * 7.4pt because below that a printed letter stops being comfortably readable
-   * and the honest answer is "this is too long for one page" rather than a
-   * technically-compliant page nobody can read.
-   *
-   * Imperative rather than through state: this measures, adjusts and measures
-   * again, and routing each step through a re-render would turn a synchronous
-   * loop into a cascade of paints.
-   */
-  const bodyRef = useRef<HTMLDivElement>(null);
-  /*
-   * The last result reported upward.
-   *
-   * The effect has no dependency array — it must re-measure after every render,
-   * because any field can change the height. But `onFit` sets state in the
-   * builder, and reporting a freshly-built object every pass meant a new state
-   * value every pass, which re-rendered, which re-measured: an infinite loop
-   * that blanked the preview. Only a genuine change is sent.
-   */
-  const lastFit = useRef({ pt: 0, overflowing: false });
-  useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    let pt = 9.5;
-    el.style.fontSize = `${pt}pt`;
-    while (el.scrollHeight > el.clientHeight + 1 && pt > 7.4) {
-      pt = Math.round((pt - 0.1) * 10) / 10;
-      el.style.fontSize = `${pt}pt`;
-    }
-    const next = { pt, overflowing: el.scrollHeight > el.clientHeight + 1 };
-    if (next.pt !== lastFit.current.pt || next.overflowing !== lastFit.current.overflowing) {
-      lastFit.current = next;
-      onFit?.(next);
-    }
-  });
-
   const address = [org.addressLine1, org.addressLine2, org.country].filter(Boolean);
-  const office = [draft.department, org.addressLine2 || org.addressLine1].filter(Boolean).join(', ');
   const stamp = generatedAt || new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 
   return (
     <article
       className="sheet font-serif shadow-xl"
-      /* The chosen families are handed down as custom properties and picked up
-         by two rules in index.css. Setting them here rather than on every
-         element means the typeface is one decision in one place, which is the
-         same reason there is one sheet rather than one per document type. */
       style={{
         color: ink,
         ['--doc-body' as string]: face.body,
@@ -140,36 +141,14 @@ export default function DocumentSheet({
       } as React.CSSProperties}
       aria-label={`${org.name} — ${draft.documentTitle || KIND_LABEL[draft.kind]}`}
     >
-      {/* ── Behind everything ──────────────────────────────────────────────
-          The uploaded watermark if there is one, otherwise the guilloché drawn
-          from this document's own reference. Something is always back there:
-          a plain white field behind the body is the one thing that reads as a
-          word processor rather than as stationery. */}
-      <div
-        className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"
-        aria-hidden="true"
-      >
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden="true">
         {f.watermark && org.watermark ? (
-          <img
-            src={org.watermark}
-            alt=""
-            className="select-none"
-            style={{
-              width: '150mm',
-              /* Visible, and no more. Heavy enough to survive a photocopier and
-                 to be obviously missing from a flat reproduction; light enough
-                 that nine-point body copy still reads cleanly over it. */
-              opacity: 0.13,
-            }}
-          />
+          <img src={org.watermark} alt="" className="select-none" style={{ width: '150mm', opacity: 0.13 }} />
         ) : f.guilloche ? (
-          <Guilloche seed={reference} size={560} color={accent} opacity={0.1} rings={6} />
+          <Guilloche seed={`${reference}:${pageNumber}`} size={560} color={accent} opacity={0.1} rings={6} />
         ) : null}
       </div>
 
-      {/* ── Frame ───────────────────────────────────────────────────────────
-          A hairline outside, a heavier rule inside. Two weights read as
-          deliberate; one reads as a border somebody forgot to remove. */}
       {f.frame && (
         <>
           <div className="pointer-events-none absolute" style={{ inset: '6mm', border: `0.5mm solid ${accent}`, opacity: 0.9 }} />
@@ -177,9 +156,6 @@ export default function DocumentSheet({
         </>
       )}
 
-      {/* ── Microtext ───────────────────────────────────────────────────────
-          Along the head and foot of the frame. It says nothing, and is legible
-          only under magnification, which is the whole of its purpose. */}
       {f.microtext && ['4.6mm', 'bottom'].map((pos) => (
         <div
           key={pos}
@@ -194,334 +170,286 @@ export default function DocumentSheet({
         </div>
       ))}
 
-      {/*
-        The left margin widens when the classification strip is drawn.
+      {!continued && f.marginRule && draft.classification && (
+        <MarginRule classification={draft.classification} ink={ink} face={face} />
+      )}
 
-        The strip used to sit at 10.5mm against text starting at 15mm — about
-        two millimetres of clearance once the vertical line box was accounted
-        for, which is inside the margin of error for font metrics and letter
-        spacing, and it collided with the body copy. Space is now reserved for
-        it rather than assumed. An asymmetric left margin is what a document
-        with a margin marking has always had.
-      */}
       <div
         className="relative flex flex-col"
         style={{
-          padding: f.marginRule && draft.classification ? '13mm 15mm 9mm 21mm' : '13mm 15mm 9mm',
+          padding: continued ? '11mm 15mm 16mm 21mm' : '13mm 15mm 16mm 21mm',
           height: '297mm',
         }}
       >
-        {/* ── Letterhead ────────────────────────────────────────────────── */}
-        <header className="flex items-start justify-between gap-6">
-          <div className="min-w-0">
-            {/* No logo is not a gap. The organisation's name set in display
-                type is a real letterhead, and a great many are exactly that. */}
-            {org.logo
-              ? <img src={org.logo} alt={org.name} style={{ maxHeight: '15mm', maxWidth: '78mm' }} />
-              : <div className="font-serif leading-none" style={{ fontSize: '19pt', color: accent }}>{org.name}</div>}
+        {continued ? (
+          <div className="flex items-center justify-between border-b border-slate-300 pb-2 font-sans text-[7.5pt] uppercase tracking-[0.16em]">
+            <span className="font-bold normal-case tracking-normal">{org.legalName || org.name}</span>
+            <span className="text-slate-400">{reference} · Continued</span>
           </div>
-
-          <h1
-            className="shrink-0 text-right font-sans font-bold uppercase"
-            style={{ fontSize: '12.5pt', letterSpacing: '0.02em', lineHeight: 1.1 }}
-          >
-            {draft.headerLabel || KIND_LABEL[draft.kind] || 'Official correspondence'}
-          </h1>
-        </header>
-
-        {/* Address on the left, the document's identifiers on the right. Both
-            are things a recipient reads back down a phone, so both are set to
-            be found quickly rather than to balance the page. */}
-        <div className="flex items-start justify-between gap-8" style={{ marginTop: '4mm' }}>
-          <address className="text-[7.5pt] not-italic leading-[1.5] opacity-85">
-            <div className="font-semibold">{org.legalName || org.name}</div>
-            {address.map((line) => <div key={line}>{line}</div>)}
-            {org.supportEmail && <div>{org.supportEmail}</div>}
-          </address>
-
-          <dl className="shrink-0 text-right text-[7.5pt] leading-[1.6]">
-            <MetaRow label="Date of issue">{longDate(draft.issuedOn)}</MetaRow>
-            <MetaRow label="Reference" mono>{reference}</MetaRow>
-            {draft.department && <MetaRow label="Department">{draft.department}</MetaRow>}
-          </dl>
-        </div>
-
-        {/* ── Foil strip ───────────────────────────────────────────────────
-            Where a plain double rule used to be. The issuer's name and the
-            document's own reference are struck into the band, so the strip on
-            a page belongs to that page rather than being stationery anyone
-            could reuse. */}
-        <div style={{ marginTop: '4mm' }}>
-          {f.holoStrip ? (
-            <HoloStrip
-              stops={foilSpec.stops}
-              text={`${(org.legalName || org.name).toUpperCase()} · ${reference}`}
-              textColor={foilSpec.text}
-              edge={foilSpec.edge}
-            />
-          ) : (
-            <>
-              <div style={{ height: '0.7mm', background: ink }} />
-              <div style={{ height: '0.2mm', background: ink, marginTop: '0.7mm', opacity: 0.7 }} />
-            </>
-          )}
-        </div>
-
-        {/* ── Margin strip ──────────────────────────────────────────────────
-            The classification, set vertically down the left edge. It is what
-            survives a document being read in a stack — the only thing legible
-            when the page is half under another one. */}
-        {f.marginRule && draft.classification && (() => {
-          /*
-           * Drawn as SVG, not as CSS `writing-mode`.
-           *
-           * html2canvas does not implement writing-mode. It laid the string out
-           * horizontally and then applied the 180-degree rotation that makes
-           * vertical-rl read bottom-to-top — so the marking came out of the PDF
-           * upside down and mirrored, while looking perfectly correct on screen.
-           * The same trap as the foil strip, and the same answer: SVG is
-           * serialised and rasterised by the browser itself, so the capture gets
-           * exactly what the preview shows.
-           *
-           * Ten units to the millimetre, and the viewBox keeps the strip's real
-           * 3mm x 132mm proportions, so preserveAspectRatio="none" scales
-           * without distorting the type.
-           */
-          const W = 30;
-          const H = 1320;
-          const FS = 19.4;
-          const label = draft.classification.toUpperCase();
-          /* The rules stop short of the text rather than running under it. */
-          const half = Math.min(H * 0.42, (label.length * FS * 0.85) / 2 + 40);
-
-          return (
-            <div
-              className="pointer-events-none absolute"
-              style={{ left: '12.8mm', width: '3mm', top: '95mm', bottom: '70mm' }}
-              aria-hidden="true"
-            >
-              <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none" role="presentation">
-                <line x1={W / 2} y1={0} x2={W / 2} y2={H / 2 - half} stroke={ink} strokeWidth={2} opacity={0.3} />
-                <line x1={W / 2} y1={H / 2 + half} x2={W / 2} y2={H} stroke={ink} strokeWidth={2} opacity={0.3} />
-                <text
-                  x={W / 2}
-                  y={H / 2}
-                  fill={ink}
-                  opacity={0.55}
-                  fontSize={FS}
-                  letterSpacing={FS * 0.3}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontFamily={face.chrome}
-                  transform={`rotate(-90 ${W / 2} ${H / 2})`}
-                >
-                  {label}
-                </text>
-              </svg>
-            </div>
-          );
-        })()}
-
-        {/* ── Addressee ─────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-8" style={{ marginTop: '7mm' }}>
-          <div className="min-w-0">
-            <div className="font-sans text-[6.5pt] uppercase tracking-[0.2em] opacity-55">
-              Addressed to
-            </div>
-            <div className="font-serif font-bold" style={{ fontSize: '14pt', marginTop: '1.5mm' }}>
-              {draft.recipientName || '—'}
-            </div>
-            <div className="text-[8.5pt] leading-[1.5] opacity-80" style={{ marginTop: '1mm' }}>
-              {draft.recipientAddress.split('\n').map((l) => l.trim()).filter(Boolean)
-                .map((line, i) => <div key={`${line}-${i}`}>{line}</div>)}
-            </div>
-          </div>
-
-          {draft.classification && (
-            <div className="shrink-0 text-right" style={{ maxWidth: '62mm' }}>
-              <div style={{ height: '0.2mm', background: ink, opacity: 0.5, marginBottom: '1.5mm' }} />
-              <div className="font-sans text-[7.5pt] font-bold uppercase tracking-[0.14em]">
-                {draft.classification}
+        ) : (
+          <>
+            <header className="flex items-start justify-between gap-6">
+              <div className="min-w-0">
+                {org.logo
+                  ? <img src={org.logo} alt={org.name} style={{ maxHeight: '15mm', maxWidth: '78mm' }} />
+                  : <div className="font-serif leading-none" style={{ fontSize: '19pt', color: accent }}>{org.name}</div>}
               </div>
-              {draft.addresseeNote && (
-                <div className="text-[6.5pt] leading-snug opacity-70" style={{ marginTop: '0.8mm' }}>
-                  {draft.addresseeNote}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+              <h1 className="shrink-0 text-right font-sans font-bold uppercase" style={{ fontSize: '12.5pt', letterSpacing: '0.02em', lineHeight: 1.1 }}>
+                {draft.headerLabel || KIND_LABEL[draft.kind] || 'Official correspondence'}
+              </h1>
+            </header>
 
-        {draft.subject && (
-          <p className="text-[9.5pt] font-semibold" style={{ marginTop: '7mm' }}>
-            Subject: <span className="font-normal">{draft.subject}</span>
-          </p>
-        )}
-
-        {/* ── Body. The one part of a document this system never stores. ── */}
-        <div
-          ref={bodyRef}
-          className="min-h-0 flex-1 overflow-hidden leading-[1.75]"
-          style={{ marginTop: '5mm', textAlign: 'justify', hyphens: 'auto' }}
-        >
-          {paragraphs(draft.body).map((p, i) => (
-            <p key={i} style={{ marginBottom: '3.5mm', whiteSpace: 'pre-line' }}>{p}</p>
-          ))}
-        </div>
-
-        {/* ── Signature and seal ────────────────────────────────────────── */}
-        <div className="flex items-end justify-between gap-6" style={{ paddingTop: '7mm' }}>
-          <div>
-            <div className="text-[9pt]" style={{ marginBottom: '1mm' }}>Yours sincerely,</div>
-
-            <Signature
-              name={draft.signerName}
-              image={signatureImage}
-              authorizationId={authorizationId}
-            />
-
-            <div className="text-[9pt] font-bold" style={{ marginTop: '1.5mm' }}>{draft.signerName}</div>
-            <div className="text-[7.5pt] leading-[1.5] opacity-75">
-              {draft.signerTitle && <div>{draft.signerTitle}</div>}
-              {draft.department && <div>{draft.department} Department</div>}
-              <div>{org.legalName || org.name}</div>
-            </div>
-
-            {/* Authority box. The legend sits on the rule, as it does on a
-                printed form — the shape itself says "this was countersigned"
-                before anybody reads a word of it. */}
-            <div
-              className="relative"
-              style={{ marginTop: '3mm', border: `0.2mm solid ${ink}`, opacity: 0.95, padding: '3mm 3mm 2.5mm', maxWidth: '62mm' }}
-            >
-              <span
-                className="absolute bg-white px-1 font-sans text-[5.5pt] uppercase tracking-[0.16em]"
-                style={{ top: '-1.6mm', left: '2mm', color: accent }}
-              >
-                Authorised for issue by
-              </span>
-              <div className="text-[7.5pt] font-bold">{draft.signerName || '—'}</div>
-              {draft.department && <div className="text-[7pt] opacity-75">{draft.department} Department</div>}
-              <div className="text-[7pt] opacity-75">
-                Authorisation ID: <span className="font-mono font-semibold">{authorizationId}</span>
-              </div>
-            </div>
-          </div>
-
-          {f.seal && (
-            <div className="shrink-0 self-end" style={{ paddingBottom: '4mm' }}>
-              {org.seal ? (
-                <img src={org.seal} alt="" aria-hidden="true" style={{ width: '32mm', height: '32mm', objectFit: 'contain' }} />
-              ) : (
-                /* No seal uploaded: a struck rosette in its place, drawn from
-                   this reference. Better than a gap, and it is the same
-                   convention rather than a substitute for one. */
-                <div className="relative flex items-center justify-center" style={{ width: '32mm', height: '32mm' }}>
-                  <Guilloche seed={`${reference}:seal`} size={121} color={accent} opacity={0.75} rings={4} strokeWidth={0.4} />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className="font-sans text-[4.5pt] uppercase tracking-[0.14em]" style={{ color: accent }}>
-                      {org.name.slice(0, 22)}
-                    </span>
-                    <span className="font-mono text-[4pt] opacity-70" style={{ marginTop: '0.5mm' }}>{documentId.slice(0, 8)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── Secure document panel ─────────────────────────────────────── */}
-        <div style={{ marginTop: '5mm', borderTop: `0.2mm dashed ${ink}`, opacity: 0.35 }} />
-
-        <footer style={{ marginTop: '4mm' }}>
-          <div className="flex items-start justify-between gap-6">
-            <div className="min-w-0 flex-1">
-              <div className="font-sans text-[7.5pt] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>
-                Secure document
-              </div>
-
-              {/* Every clause here is a thing that happened. Issued under a
-                  reference; carries a control mark; recorded on a register.
-                  What it pointedly does not say is that the page in the
-                  reader's hand has been checked, because nothing checked it. */}
-              <p className="text-[6.5pt] leading-[1.55] opacity-80" style={{ marginTop: '1.5mm', maxWidth: '105mm' }}>
-                Issued by {org.legalName || org.name} under reference {reference}. This document
-                carries a control mark and a verification identifier derived from that reference,
-                and the details below are recorded on the issuer&rsquo;s register. The register does
-                not hold the text of this letter, so the comparison is one you make.
-                {org.supportEmail
-                  ? ` If you did not expect this letter, or any detail appears altered, contact ${org.supportEmail} before acting on it.`
-                  : ' If you did not expect this letter, or any detail appears altered, contact the issuer before acting on it.'}
-              </p>
-
-              <dl className="grid grid-cols-2 gap-x-6 text-[6.5pt]" style={{ marginTop: '2.5mm' }}>
-                <FootRow label="Document ID" mono>{documentId}</FootRow>
-                <FootRow label="Reference" mono>{reference}</FootRow>
-                <FootRow label="Issuing office">{office || org.name}</FootRow>
-                <FootRow label="Classification">{draft.classification || '—'}</FootRow>
-                <FootRow label="Version">{draft.version || '1.0'}</FootRow>
-                <FootRow label="Revision">{draft.revision || 'A'}</FootRow>
-                <FootRow label="Generated" mono>{stamp}</FootRow>
-                <FootRow label="Authorisation" mono>{authorizationId}</FootRow>
-                {/* Half the digest. 64 hex characters do not fit at a size
-                    anybody would compare, and 128 bits is already far past what
-                    a person checking by eye can distinguish. The portal prints
-                    the same leading run so the two read against each other. */}
-                <FootRow label="Fingerprint" mono>{groupHex(fingerprint.slice(0, 20))}</FootRow>
+            <div className="flex items-start justify-between gap-8" style={{ marginTop: '4mm' }}>
+              <address className="text-[7.5pt] not-italic leading-[1.5] opacity-85">
+                <div className="font-semibold">{org.legalName || org.name}</div>
+                {address.map((line) => <div key={line}>{line}</div>)}
+                {org.supportEmail && <div>{org.supportEmail}</div>}
+              </address>
+              <dl className="shrink-0 text-right text-[7.5pt] leading-[1.6]">
+                <MetaRow label="Date of issue">{longDate(draft.issuedOn)}</MetaRow>
+                <MetaRow label="Reference" mono>{reference}</MetaRow>
+                {draft.department && <MetaRow label="Department">{draft.department}</MetaRow>}
               </dl>
             </div>
 
-            {f.qr && (
-              <div className="shrink-0 text-center" style={{ border: `0.2mm solid ${ink}`, padding: '2mm', width: '34mm' }}>
-                <div className="font-sans text-[5.5pt] font-bold uppercase tracking-[0.12em]">
-                  Verify this document
-                </div>
-                {qr
-                  ? <img src={qr} alt={`Verification code for ${reference}`} style={{ width: '24mm', height: '24mm', margin: '1.5mm auto' }} />
-                  : <div style={{ width: '24mm', height: '24mm', margin: '1.5mm auto', border: `0.2mm dashed ${accent}` }} />}
-                <div style={{ height: '0.15mm', background: ink, opacity: 0.4 }} />
-                <div className="font-sans text-[4.5pt] uppercase tracking-[0.1em] opacity-70" style={{ marginTop: '1mm' }}>
-                  Scan to verify
-                </div>
-                <div className="font-mono text-[5pt] font-semibold" style={{ marginTop: '0.5mm' }}>{documentId}</div>
-              </div>
-            )}
-          </div>
+            <div style={{ marginTop: '4mm' }}>
+              {f.holoStrip ? (
+                <HoloStrip stops={foilSpec.stops} text={`${(org.legalName || org.name).toUpperCase()} · ${reference}`} textColor={foilSpec.text} edge={foilSpec.edge} />
+              ) : (
+                <><div style={{ height: '0.7mm', background: ink }} /><div style={{ height: '0.2mm', background: ink, marginTop: '0.7mm', opacity: 0.7 }} /></>
+              )}
+            </div>
 
-          {/* Bottom bar. What the document is NOT is the line that stops it
-              being waved at a counter as though it were something else. */}
-          {/* No rule above this. There is already a dashed separator opening
-              the panel and a solid one under the letterhead; a third line four
-              millimetres from the paper's edge reads as a mistake, and it was
-              the one that stopped short of the verification panel. */}
-          <div
-            className="flex items-center justify-between font-sans text-[5.5pt] uppercase tracking-[0.14em] opacity-60"
-            style={{ marginTop: '3.5mm' }}
-          >
-            <span>{draft.footerNote}</span>
-            <span className="font-mono tracking-[0.08em]">{documentId}</span>
-            <span>Page 1 of 1</span>
-          </div>
-        </footer>
+            <div className="flex items-start justify-between gap-8" style={{ marginTop: '7mm' }}>
+              <div className="min-w-0">
+                <div className="font-sans text-[6.5pt] uppercase tracking-[0.2em] opacity-55">Addressed to</div>
+                <div className="font-serif font-bold" style={{ fontSize: '14pt', marginTop: '1.5mm' }}>{draft.recipientName || '—'}</div>
+                <div className="text-[8.5pt] leading-[1.5] opacity-80" style={{ marginTop: '1mm' }}>
+                  {draft.recipientAddress.split('\n').map((line, i) => line.trim() && <div key={`${line}-${i}`}>{line.trim()}</div>)}
+                </div>
+              </div>
+              {draft.classification && (
+                <div className="shrink-0 text-right" style={{ maxWidth: '62mm' }}>
+                  <div style={{ height: '0.2mm', background: ink, opacity: 0.5, marginBottom: '1.5mm' }} />
+                  <div className="font-sans text-[7.5pt] font-bold uppercase tracking-[0.14em]">{draft.classification}</div>
+                  {draft.addresseeNote && <div className="text-[6.5pt] leading-snug opacity-70" style={{ marginTop: '0.8mm' }}>{draft.addresseeNote}</div>}
+                </div>
+              )}
+            </div>
+
+            {draft.subject && (
+              <p className="text-[9.5pt] font-semibold" style={{ marginTop: '7mm' }}>
+                Subject: <span className="font-normal">{draft.subject}</span>
+              </p>
+            )}
+          </>
+        )}
+
+        <div
+          ref={bodyRef}
+          className="min-h-0 flex-1 overflow-hidden leading-[1.75]"
+          style={{ marginTop: continued ? '8mm' : '5mm', textAlign: 'justify', hyphens: 'auto' }}
+          data-pagination-body={paginationKind}
+        >
+          {body.map((p, i) => <p key={`${i}-${p.slice(0, 12)}`} style={{ marginBottom: '3.5mm', whiteSpace: 'pre-line' }}>{p}</p>)}
+        </div>
+
+        {showEndMatter && (
+          <EndMatter
+            org={org}
+            draft={draft}
+            reference={reference}
+            documentId={documentId}
+            fingerprint={fingerprint}
+            authorizationId={authorizationId}
+            generatedAt={stamp}
+            signatureImage={signatureImage}
+            qr={qr}
+            accent={accent}
+            ink={ink}
+            pageNumber={pageNumber}
+            pageCount={pageCount}
+          />
+        )}
       </div>
+
+      {!showEndMatter && (
+        <div className="absolute right-[15mm] bottom-[11mm] font-sans text-[6.5pt] uppercase tracking-[0.16em] text-slate-400">
+          Page {pageNumber} of {pageCount}
+        </div>
+      )}
     </article>
   );
 }
 
-function MetaRow({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+function EndMatter({
+  org, draft, reference, documentId, fingerprint, authorizationId, generatedAt,
+  signatureImage, qr, accent, ink, pageNumber, pageCount,
+}: {
+  org: Identity; draft: DocumentDraft; reference: string; documentId: string;
+  fingerprint: string; authorizationId: string; generatedAt: string;
+  signatureImage?: string | null; qr: string | null; accent: string; ink: string;
+  pageNumber: number; pageCount: number;
+}) {
+  const office = [draft.department, org.addressLine2 || org.addressLine1].filter(Boolean).join(', ');
   return (
-    <div className="flex items-baseline justify-end gap-3">
-      <dt className="font-sans text-[6pt] uppercase tracking-[0.16em] opacity-50">{label}</dt>
-      <dd className={`font-semibold ${mono ? 'font-mono tracking-[0.06em]' : ''}`}>{children}</dd>
+    <>
+      <div className="flex items-end justify-between gap-6" style={{ paddingTop: '7mm' }}>
+        <div>
+          <div className="text-[9pt]" style={{ marginBottom: '1mm' }}>Yours sincerely,</div>
+          <Signature name={draft.signerName} image={signatureImage} authorizationId={authorizationId} ink="#14213D" />
+          <div className="text-[9pt] font-bold" style={{ marginTop: '1.5mm' }}>{draft.signerName}</div>
+          <div className="text-[7.5pt] leading-[1.5] opacity-75">
+            {draft.signerTitle && <div>{draft.signerTitle}</div>}
+            {draft.department && <div>{draft.department} Department</div>}
+            <div>{org.legalName || org.name}</div>
+          </div>
+          <div className="relative" style={{ marginTop: '3mm', border: `0.2mm solid ${ink}`, opacity: 0.95, padding: '3mm 3mm 2.5mm', maxWidth: '62mm' }}>
+            <span className="absolute bg-white px-1 font-sans text-[5.5pt] uppercase tracking-[0.16em]" style={{ top: '-1.6mm', left: '2mm', color: accent }}>Authorised for issue by</span>
+            <div className="text-[7.5pt] font-bold">{draft.signerName || '—'}</div>
+            {draft.department && <div className="text-[7pt] opacity-75">{draft.department} Department</div>}
+            <div className="text-[7pt] opacity-75">Authorisation ID: <span className="font-mono font-semibold">{authorizationId}</span></div>
+          </div>
+        </div>
+
+        {draft.features.seal && (
+          <div className="shrink-0 self-end" style={{ paddingBottom: '4mm' }}>
+            {org.seal ? (
+              <img src={org.seal} alt="" aria-hidden="true" style={{ width: '32mm', height: '32mm', objectFit: 'contain' }} />
+            ) : (
+              <div className="relative flex items-center justify-center" style={{ width: '32mm', height: '32mm' }}>
+                <Guilloche seed={`${reference}:seal`} size={121} color={accent} opacity={0.75} rings={4} strokeWidth={0.4} />
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <span className="font-sans text-[4.5pt] uppercase tracking-[0.14em]" style={{ color: accent }}>{org.name.slice(0, 22)}</span>
+                  <span className="font-mono text-[4pt] opacity-70" style={{ marginTop: '0.5mm' }}>{documentId.slice(0, 8)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: '5mm', borderTop: `0.2mm dashed ${ink}`, opacity: 0.35 }} />
+      <footer style={{ marginTop: '4mm' }}>
+        <div className="flex items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <div className="font-sans text-[7.5pt] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>Secure document</div>
+            <p className="text-[6.5pt] leading-[1.55] opacity-80" style={{ marginTop: '1.5mm', maxWidth: '105mm' }}>
+              Issued by {org.legalName || org.name} under reference {reference}. This document carries a control mark and a verification identifier derived from that reference, and the details below are recorded on the issuer&rsquo;s register. The register does not hold the text of this letter, so the comparison is one you make.
+              {org.supportEmail ? ` If you did not expect this letter, or any detail appears altered, contact ${org.supportEmail} before acting on it.` : ' If you did not expect this letter, or any detail appears altered, contact the issuer before acting on it.'}
+            </p>
+            <dl className="grid grid-cols-2 gap-x-6 text-[6.5pt]" style={{ marginTop: '2.5mm' }}>
+              <FootRow label="Document ID" mono>{documentId}</FootRow>
+              <FootRow label="Reference" mono>{reference}</FootRow>
+              <FootRow label="Issuing office">{office || org.name}</FootRow>
+              <FootRow label="Classification">{draft.classification || '—'}</FootRow>
+              <FootRow label="Version">{draft.version || '1.0'}</FootRow>
+              <FootRow label="Revision">{draft.revision || 'A'}</FootRow>
+              <FootRow label="Generated" mono>{generatedAt}</FootRow>
+              <FootRow label="Authorisation" mono>{authorizationId}</FootRow>
+              <FootRow label="Fingerprint" mono>{groupHex(fingerprint.slice(0, 20))}</FootRow>
+            </dl>
+          </div>
+
+          {draft.features.qr && (
+            <div className="shrink-0 text-center" style={{ border: `0.2mm solid ${ink}`, padding: '2mm', width: '34mm' }}>
+              <div className="font-sans text-[5.5pt] font-bold uppercase tracking-[0.12em]">Verify this document</div>
+              {qr ? <img src={qr} alt={`Verification code for ${reference}`} style={{ width: '24mm', height: '24mm', margin: '1.5mm auto' }} /> : <div style={{ width: '24mm', height: '24mm', margin: '1.5mm auto', border: `0.2mm dashed ${accent}` }} />}
+              <div style={{ height: '0.15mm', background: ink, opacity: 0.4 }} />
+              <div className="font-sans text-[4.5pt] uppercase tracking-[0.1em] opacity-70" style={{ marginTop: '1mm' }}>Scan to verify</div>
+              <div className="font-mono text-[5pt] font-semibold" style={{ marginTop: '0.5mm' }}>{documentId}</div>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-between font-sans text-[5.5pt] uppercase tracking-[0.14em] opacity-60" style={{ marginTop: '3.5mm' }}>
+          <span>{draft.footerNote}</span><span className="font-mono tracking-[0.08em]">{documentId}</span><span>Page {pageNumber} of {pageCount}</span>
+        </div>
+      </footer>
+    </>
+  );
+}
+
+function MarginRule({ classification, ink, face }: { classification: string; ink: string; face: ReturnType<typeof typefaceFor> }) {
+  const W = 30; const H = 1320; const FS = 19.4; const label = classification.toUpperCase();
+  const half = Math.min(H * 0.42, (label.length * FS * 0.85) / 2 + 40);
+  return (
+    <div className="pointer-events-none absolute" style={{ left: '12.8mm', width: '3mm', top: '95mm', bottom: '70mm' }} aria-hidden="true">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none" role="presentation">
+        <line x1={W / 2} y1={0} x2={W / 2} y2={H / 2 - half} stroke={ink} strokeWidth={2} opacity={0.3} />
+        <line x1={W / 2} y1={H / 2 + half} x2={W / 2} y2={H} stroke={ink} strokeWidth={2} opacity={0.3} />
+        <text x={W / 2} y={H / 2} fill={ink} opacity={0.55} fontSize={FS} letterSpacing={FS * 0.3} textAnchor="middle" dominantBaseline="central" fontFamily={face.chrome} transform={`rotate(-90 ${W / 2} ${H / 2})`}>{label}</text>
+      </svg>
     </div>
   );
 }
 
+function MetaRow({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+  return <div className="flex items-baseline justify-end gap-3"><dt className="font-sans text-[6pt] uppercase tracking-[0.16em] opacity-50">{label}</dt><dd className={`font-semibold ${mono ? 'font-mono tracking-[0.06em]' : ''}`}>{children}</dd></div>;
+}
+
 function FootRow({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
-  return (
-    <div className="flex gap-2" style={{ paddingBottom: '0.8mm' }}>
-      <dt className="w-[19mm] shrink-0 font-sans uppercase tracking-[0.1em] opacity-50">{label}</dt>
-      <dd className={`min-w-0 flex-1 font-semibold ${mono ? 'font-mono' : ''}`}>{children}</dd>
-    </div>
-  );
+  return <div className="flex gap-2" style={{ paddingBottom: '0.8mm' }}><dt className="w-[19mm] shrink-0 font-sans uppercase tracking-[0.1em] opacity-50">{label}</dt><dd className={`min-w-0 flex-1 font-semibold ${mono ? 'font-mono' : ''}`}>{children}</dd></div>;
+}
+
+function samePages(a: PageBody[], b: PageBody[]) {
+  return a.length === b.length && a.every((page, i) => page.length === b[i].length && page.every((text, j) => text === b[i][j]));
+}
+
+function paginateBody(body: string[], capacities: Record<string, number>): PageBody[] {
+  if (!body.length || fits(body, 'firstFinal', capacities)) return [body];
+  const pages: PageBody[] = [];
+  let remaining = body;
+  let first = true;
+  while (remaining.length) {
+    const finalKind = first ? 'firstFinal' : 'continuedFinal';
+    if (fits(remaining, finalKind, capacities)) {
+      pages.push(remaining);
+      break;
+    }
+    const fullKind = first ? 'firstFull' : 'continuedFull';
+    const split = takeFit(remaining, capacities[fullKind], fullKind);
+    pages.push(split.page);
+    remaining = split.rest;
+    first = false;
+  }
+  return pages.length ? pages : [[]];
+}
+
+function fits(body: string[], kind: string, capacities: Record<string, number>) {
+  return measureBody(body, kind) <= capacities[kind] + 1;
+}
+
+function takeFit(body: string[], capacity: number, kind: string): { page: string[]; rest: string[] } {
+  let low = 1; let high = body.length; let best = 0;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (measureBody(body.slice(0, middle), kind) <= capacity + 1) { best = middle; low = middle + 1; } else high = middle - 1;
+  }
+  if (best > 0) return { page: body.slice(0, best), rest: body.slice(best) };
+
+  const words = body[0].split(/\s+/).filter(Boolean);
+  low = 1; high = words.length; best = 0;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (measureBody([words.slice(0, middle).join(' ')], kind) <= capacity + 1) { best = middle; low = middle + 1; } else high = middle - 1;
+  }
+  const count = Math.max(1, best);
+  return { page: [words.slice(0, count).join(' ')], rest: [words.slice(count).join(' '), ...body.slice(1)].filter(Boolean) };
+}
+
+function measureBody(body: string[], kind: string) {
+  const source = document.querySelector<HTMLDivElement>(`.sheet-pagination-probes [data-pagination-body="${kind}"]`);
+  if (!source) return Number.POSITIVE_INFINITY;
+  const clone = source.cloneNode(false) as HTMLDivElement;
+  const computed = getComputedStyle(source);
+  clone.style.position = 'absolute'; clone.style.left = '-100000px'; clone.style.top = '0';
+  clone.style.visibility = 'hidden'; clone.style.display = 'block'; clone.style.width = `${source.clientWidth}px`;
+  clone.style.height = 'auto'; clone.style.maxHeight = 'none'; clone.style.overflow = 'visible'; clone.style.flex = 'none';
+  clone.style.fontFamily = computed.fontFamily; clone.style.fontSize = computed.fontSize; clone.style.lineHeight = computed.lineHeight;
+  clone.style.letterSpacing = computed.letterSpacing; clone.style.wordSpacing = computed.wordSpacing; clone.style.textAlign = computed.textAlign; clone.style.hyphens = computed.hyphens;
+  body.forEach((text) => { const p = document.createElement('p'); p.style.marginBottom = '3.5mm'; p.style.whiteSpace = 'pre-line'; p.textContent = text; clone.appendChild(p); });
+  document.body.appendChild(clone);
+  const height = clone.scrollHeight;
+  clone.remove();
+  return height;
 }

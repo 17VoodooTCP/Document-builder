@@ -72,7 +72,7 @@ export default function Builder() {
 
   const [print, setPrint] = useState({ fingerprint: '', authorizationId: '', documentId: '' });
   const [issued, setIssued] = useState<IssuedDocument | null>(null);
-  const [fit, setFit] = useState<{ pt: number; overflowing: boolean }>({ pt: 9.5, overflowing: false });
+  const [fit, setFit] = useState<{ pt: number; overflowing: boolean; pages: number }>({ pt: 9.5, overflowing: false, pages: 1 });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'save' | 'issue' | 'pdf' | null>(null);
   /* The live sheet is what gets captured, so the export is always exactly what
@@ -212,7 +212,7 @@ export default function Builder() {
   }
 
   async function savePdf() {
-    const sheet = sheetRef.current?.querySelector<HTMLElement>('.sheet');
+    const sheet = sheetRef.current?.querySelector<HTMLElement>('.sheet-stack');
     if (!sheet) return;
     setBusy('pdf');
     setError('');
@@ -221,6 +221,7 @@ export default function Builder() {
         title: `${doc.documentTitle || 'Document'} — ${doc.reference}`,
         subject: doc.subject,
         author: org?.legalName || org?.name,
+        saveWithPicker: true,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not build the PDF.');
@@ -536,21 +537,18 @@ export default function Builder() {
           )}
         </div>
 
-        {/* The sheet is one page and the body is fitted into it, so the author
-            is told what that cost — and told plainly when it was not enough,
-            because the one thing this must never do is drop text quietly. */}
         {fit.overflowing ? (
           <div className="no-print mb-4">
             <Banner>
-              This letter is too long for one page even at the smallest size the body will
-              be set in, so the end of it is being cut off. Shorten the text before issuing.
+              The letter could not be laid out safely. Review the body before issuing.
             </Banner>
           </div>
-        ) : fit.pt < 9.5 ? (
+        ) : fit.pages > 1 ? (
           <div className="no-print mb-4">
             <Banner tone="info">
-              The body has been reduced to {fit.pt}pt to fit the page. Shorten it to bring
-              it back up to 9.5pt.
+              This letter will issue across {fit.pages} pages. Continued pages carry the
+              reference and page number, and the signature and verification panel remain
+              together on the final page.
             </Banner>
           </div>
         ) : null}
@@ -613,14 +611,14 @@ function Preview({ children }: { children: React.ReactNode }) {
       /* offsetHeight, not getBoundingClientRect — the sheet sits inside the
          transformed wrapper, so its rect is already scaled and feeding that
          back in would compound the scale on every pass. */
-      const sheet = outer.querySelector<HTMLElement>('.sheet');
+      const sheet = outer.querySelector<HTMLElement>('.sheet-stack') || outer.querySelector<HTMLElement>('.sheet');
       if (sheet) setHeight(sheet.offsetHeight);
     };
 
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(outer);
-    const sheet = outer.querySelector('.sheet');
+    const sheet = outer.querySelector('.sheet-stack') || outer.querySelector('.sheet');
     if (sheet) observer.observe(sheet);
     return () => observer.disconnect();
     /* Mounted once. Every subsequent change — the column resizing, the body
