@@ -103,16 +103,16 @@ export function Guilloche({
  * otherwise, and the wording under it says who the document is attributable to
  * rather than claiming somebody signed it in person.
  *
- * Dark ink, not the accent colour. A signature struck in a brand teal reads as
- * a logo; ink on a letter is ink, and near-black with a trace of blue is what
- * a fountain pen actually leaves on paper.
+ * Blue-ink treatment, not the organisation accent. The generated variant is
+ * intentionally a facsimile and is labelled as such; a name-derived mark must
+ * never be presented as proof that somebody signed in person.
  *
  * Under it runs a line of microprinting carrying the authorisation id. That
  * ties this signature block to this document — lifting the image alone leaves
  * the wrong id under it, legible to anyone who puts a glass on it.
  */
 export function Signature({
-  name, image, authorizationId, ink = '#101B2D',
+  name, image, authorizationId, ink = '#1459D9',
 }: {
   name: string; image?: string | null; authorizationId: string; ink?: string;
 }) {
@@ -139,21 +139,21 @@ export function Signature({
      * proportion to whatever is actually resting on it: never stubbier than a
      * signature line should be, never running off toward the seal.
      */
-    <div style={{ width: 'fit-content', minWidth: '34mm', maxWidth: '52mm' }}>
-      <div style={{ height: '11mm' }} className="flex items-end overflow-hidden">
+     <div style={{ width: 'fit-content', minWidth: '42mm', maxWidth: '65mm' }}>
+       <div style={{ height: '14mm' }} className="flex items-end overflow-hidden">
         {image ? (
           <img
             src={image}
             alt=""
             aria-hidden="true"
             style={{
-              maxHeight: '11mm', maxWidth: '48mm',
+               maxHeight: '14mm', maxWidth: '60mm',
                /* Scans arrive as dark-on-white JPEGs. Multiply drops the white
                   so the stroke sits on the paper rather than in a grey box.
-                  The restrained blue-black treatment is the visual weight of an
-                  archival fountain-pen ink, rather than flat screen black. */
+                  This blue-ink pass is restrained enough for official paper,
+                  while remaining visibly distinct from printed body text. */
                mixBlendMode: 'multiply',
-               filter: 'sepia(0.35) saturate(2.8) hue-rotate(176deg) brightness(0.62) contrast(1.18)',
+               filter: 'sepia(0.2) saturate(4.2) hue-rotate(176deg) brightness(0.58) contrast(1.22)',
             }}
           />
         ) : name ? (
@@ -174,15 +174,17 @@ export function Signature({
                * so nothing was shrinking — 14pt was simply too small once it
                * sat next to nine-point type on a printed page.
                */
-              fontSize: '18pt',
-              lineHeight: 1,
+               fontSize: '22pt',
+               lineHeight: 1,
                color: ink,
-              display: 'inline-block',
-              transform: `rotate(${tilt}deg)`,
-              paddingBottom: '0.6mm',
+               display: 'inline-block',
+               transform: `rotate(${tilt}deg)`,
+               paddingBottom: '0.8mm',
+               letterSpacing: '-0.02em',
+               fontWeight: 500,
               /* A few millimetres of run-out past the last letter, so the rule
                  reads as a line signed over rather than one drawn to the name. */
-              paddingRight: '5mm',
+               paddingRight: '6mm',
               /* A hairline of the same ink, offset a fraction. Reads as the
                  weight variation of a nib rather than as a drop shadow. Scaled
                  down with the type — at 14pt anything heavier looks bold. */
@@ -194,7 +196,15 @@ export function Signature({
         ) : null}
       </div>
 
-      <div style={{ height: '0.25mm', background: ink, opacity: 0.65 }} />
+       <div style={{ height: '0.25mm', background: ink, opacity: 0.72 }} />
+
+       <div
+         className="microtext"
+         style={{ color: ink, opacity: 0.82, marginTop: '0.45mm', width: 0, minWidth: '100%', letterSpacing: '0.22px' }}
+         aria-label="Electronic facsimile signature"
+       >
+         ELECTRONIC FACSIMILE · AUTHORISED SIGNATORY
+       </div>
 
       {/*
         Microprinting. Legible only under magnification, which is its job.

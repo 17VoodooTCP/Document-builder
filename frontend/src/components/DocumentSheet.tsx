@@ -297,7 +297,7 @@ function EndMatter({
       <div className="flex items-end justify-between gap-6" style={{ paddingTop: '7mm' }}>
         <div>
           <div className="text-[9pt]" style={{ marginBottom: '1mm' }}>Yours sincerely,</div>
-          <Signature name={draft.signerName} image={signatureImage} authorizationId={authorizationId} ink="#14213D" />
+          <Signature name={draft.signerName} image={signatureImage} authorizationId={authorizationId} ink="#1459D9" />
           <div className="text-[9pt] font-bold" style={{ marginTop: '1.5mm' }}>{draft.signerName}</div>
           <div className="text-[7.5pt] leading-[1.5] opacity-75">
             {draft.signerTitle && <div>{draft.signerTitle}</div>}
