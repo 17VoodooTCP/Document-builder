@@ -357,6 +357,13 @@ model Document {
   issuedBy        String?
   createdAt       DateTime     @default(now())
 
+  /// Private source snapshot used to reopen a newly issued document in its
+  /// original builder. Never returned by the public verification endpoint.
+  payload         String?
+  /// Soft removal preserves the audit trail and lets the public verifier report
+  /// the document as withdrawn instead of turning a known reference unknown.
+  archivedAt      DateTime?
+
   @@unique([organisationId, reference])
   @@index([organisationId, createdAt])
   @@index([status])

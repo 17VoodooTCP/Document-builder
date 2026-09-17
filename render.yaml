@@ -7,7 +7,7 @@ services:
     plan: free            # spins down after ~15 min idle; first request cold-starts
     region: oregon
     branch: main
-    buildCommand: npm install
+    buildCommand: npm install && npm run db:push
     startCommand: npm run start
     healthCheckPath: /health
     autoDeploy: true
@@ -15,10 +15,8 @@ services:
       - key: NODE_ENV
         value: production
 
-      # `npm install` runs `prisma generate`, which builds the CLIENT.
-      # It does NOT create the database. Run `npm run db:push` once after the
-      # first deploy and after every schema change — otherwise every query
-      # fails while /health stays green and the service looks healthy.
+      # The build runs `prisma generate` and `prisma db push` so optional fields
+      # added by a release exist before the new API starts serving traffic.
       #
       # DATABASE_URL must include a database name before the "?":
       #   ...mongodb.net/docbuilder?retryWrites=true

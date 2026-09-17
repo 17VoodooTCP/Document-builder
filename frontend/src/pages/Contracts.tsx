@@ -30,6 +30,7 @@ export default function Contracts() {
   const { slug = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const draftId = params.get('draft');
+  const issuedReference = params.get('issued');
 
   const [org, setOrg] = useState<Organisation | null>(null);
   const [signatories, setSignatories] = useState<Signatory[]>([]);
@@ -72,6 +73,24 @@ export default function Contracts() {
       })
       .catch(() => {});
   }, [draftId, slug]);
+
+  /* Reopen the exact private contract source captured at issuance. */
+  useEffect(() => {
+    if (!issuedReference) return;
+    api<{ document: IssuedDocument & { payload?: string } }>(`/documents/${slug}/${encodeURIComponent(issuedReference)}/edit`)
+      .then(({ document }) => {
+        const payload = JSON.parse(document.payload || '{}') as Partial<ContractDraft>;
+        const base = newContract(document.kind as ContractKind);
+        setDoc({ ...base, ...payload, reference: document.reference, features: { ...base.features, ...(payload.features || {}) } });
+        setIssued(document);
+        setPrint({
+          fingerprint: document.fingerprint,
+          authorizationId: document.authorizationId,
+          documentId: document.verificationId,
+        });
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not reopen that agreement.'));
+  }, [issuedReference, slug]);
 
   const set = <K extends keyof ContractDraft>(k: K, v: ContractDraft[K]) => {
     setDoc((d) => (d ? { ...d, [k]: v } : d));
@@ -157,6 +176,7 @@ export default function Contracts() {
           signerTitle: first?.title || '',
           issuedOn: doc.issuedOn,
           authorizationId: print.authorizationId,
+          payload: doc,
         },
       });
       setIssued(res.document);

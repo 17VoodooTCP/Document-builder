@@ -64,6 +64,7 @@ export default function Builder() {
   const { slug = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const draftId = params.get('draft');
+  const issuedReference = params.get('issued');
 
   const [org, setOrg] = useState<Organisation | null>(null);
   const [signatories, setSignatories] = useState<Signatory[]>([]);
@@ -117,6 +118,24 @@ export default function Builder() {
       })
       .catch(() => {});
   }, [draftId, slug]);
+
+  /* Reopen the private source snapshot stored at issuance. Older records may
+     predate snapshots; the registry offers their matching draft when possible. */
+  useEffect(() => {
+    if (!issuedReference) return;
+    api<{ document: IssuedDocument & { payload?: string } }>(`/documents/${slug}/${encodeURIComponent(issuedReference)}/edit`)
+      .then(({ document }) => {
+        const payload = JSON.parse(document.payload || '{}') as Partial<DocumentDraft>;
+        setDoc({ ...blank(), ...payload, features: { ...blank().features, ...(payload.features || {}) } });
+        setIssued(document);
+        setPrint({
+          fingerprint: document.fingerprint,
+          authorizationId: document.authorizationId,
+          documentId: document.verificationId,
+        });
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not reopen that document.'));
+  }, [issuedReference, slug]);
 
   /*
    * The fingerprint and the authorisation id, recomputed on every edit.
@@ -194,6 +213,7 @@ export default function Builder() {
           signerTitle: doc.signerTitle,
           issuedOn: doc.issuedOn,
           authorizationId: print.authorizationId,
+          payload: doc,
         },
       });
       setIssued(res.document);

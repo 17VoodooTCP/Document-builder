@@ -9,6 +9,24 @@ import {
   Banner, Button, Card, Empty, Mono, PageSpinner, Select, StatusPill,
 } from '../components/ui';
 
+const BUILDER_KINDS = ['LETTER', 'CERTIFICATE', 'NOTICE', 'STATEMENT'];
+const CONTRACT_KINDS = [
+  'CONTRACTOR',
+  'SERVICE',
+  'EMPLOYMENT',
+  'PURCHASE',
+  'EQUIPMENT_RENTAL',
+  'CONSULTING',
+  'PARTNERSHIP',
+  'GENERAL',
+];
+
+function editorPath(slug: string, kind: string, query: string) {
+  if (BUILDER_KINDS.includes(kind)) return `/o/${slug}/new?${query}`;
+  if (CONTRACT_KINDS.includes(kind)) return `/o/${slug}/contracts?${query}`;
+  return null;
+}
+
 /**
  * The register.
  *
@@ -25,6 +43,7 @@ export default function Dashboard() {
   const [documents, setDocuments] = useState<IssuedDocument[] | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [error, setError] = useState('');
+  const [archiving, setArchiving] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api<{ documents: IssuedDocument[] }>(`/documents/${slug}`)
@@ -59,6 +78,29 @@ export default function Dashboard() {
     }
   }
 
+  async function archive(reference: string) {
+    if (!window.confirm(`Remove ${reference} from this register? It will be marked withdrawn so its verification history remains available.`)) return;
+    setArchiving(reference);
+    setError('');
+    try {
+      await api(`/documents/${slug}/${encodeURIComponent(reference)}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not archive that document.');
+    } finally {
+      setArchiving(null);
+    }
+  }
+
+  const editTarget = (document: IssuedDocument) => {
+    if (document.sourceAvailable) {
+      return editorPath(slug, document.kind, `issued=${encodeURIComponent(document.reference)}`);
+    }
+    const matchingDraft = drafts.find((draft) => draft.reference === document.reference);
+    if (!matchingDraft) return null;
+    return editorPath(slug, matchingDraft.kind, `draft=${matchingDraft.id}`);
+  };
+
   if (documents === null) return <PageSpinner />;
 
   return (
@@ -77,7 +119,7 @@ export default function Dashboard() {
                   </span>
                 </span>
                 <Link
-                  to={`/o/${slug}/new?draft=${d.id}`}
+                  to={editorPath(slug, d.kind, `draft=${d.id}`) || `/o/${slug}/new?draft=${d.id}`}
                   className="shrink-0 text-sm font-medium text-slate-900 underline underline-offset-2"
                 >
                   Resume
@@ -143,17 +185,39 @@ export default function Dashboard() {
                     </td>
                     <td className="px-5 py-3 text-right">
                       {canIssue && (
-                        <Select
-                          value={d.status}
-                          aria-label={`Standing of ${d.reference}`}
-                          onChange={(e) => setStatus(d.reference, e.target.value as DocumentStatus)}
-                          className="w-auto py-1 text-xs"
-                        >
-                          <option value="ACTIVE">In good standing</option>
-                          <option value="PENDING">Awaiting issue</option>
-                          <option value="EXPIRED">Expired</option>
-                          <option value="REVOKED">Withdrawn</option>
-                        </Select>
+                        <div className="flex justify-end gap-2">
+                          {editTarget(d) ? (
+                            <Link
+                              to={editTarget(d)!}
+                              className="rounded px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
+                            >
+                              Edit
+                            </Link>
+                          ) : (
+                            <span title="This older document has no saved source or matching draft." className="rounded px-2 py-1 text-xs text-slate-400 ring-1 ring-slate-200">
+                              No source
+                            </span>
+                          )}
+                          <Select
+                            value={d.status}
+                            aria-label={`Standing of ${d.reference}`}
+                            onChange={(e) => setStatus(d.reference, e.target.value as DocumentStatus)}
+                            className="w-auto py-1 text-xs"
+                          >
+                            <option value="ACTIVE">In good standing</option>
+                            <option value="PENDING">Awaiting issue</option>
+                            <option value="EXPIRED">Expired</option>
+                            <option value="REVOKED">Withdrawn</option>
+                          </Select>
+                          <Button
+                            variant="ghost"
+                            className="px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                            onClick={() => archive(d.reference)}
+                            loading={archiving === d.reference}
+                          >
+                            Remove
+                          </Button>
+                        </div>
                       )}
                     </td>
                   </tr>

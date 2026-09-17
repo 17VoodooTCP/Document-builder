@@ -52,7 +52,7 @@ export interface IssuedDocument {
   reference: string;
   verificationId: string;
   fingerprint: string;
-  kind: DocumentKind;
+  kind: string;
   documentTitle: string;
   recipientName: string;
   subject: string;
@@ -68,6 +68,8 @@ export interface IssuedDocument {
   lastVerifiedAt: string | null;
   verifyCount: number | null;
   createdAt: string;
+  /** Whether an authenticated issuer can reopen the original builder source. */
+  sourceAvailable?: boolean;
 }
 
 export interface Signatory {
@@ -83,7 +85,7 @@ export interface Signatory {
 export interface Draft {
   id: string;
   title: string;
-  kind: DocumentKind;
+  kind: string;
   payload: string;
   reference: string;
   updatedAt: string;

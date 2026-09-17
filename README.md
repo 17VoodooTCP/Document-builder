@@ -71,7 +71,7 @@ good standing — and the visual weight is identical either way.
 backend/     Express + Prisma + MongoDB. Deploys to Render.
   routes/auth.js            register, login, refresh, logout, me
   routes/organisations.js   tenants, brand assets, signatories
-  routes/documents.js       issuing, standing, drafts
+  routes/documents.js       issuing, standing, drafts, source reopen, archive
   routes/verify.js          the public portal's only endpoint
   middleware/auth.js        authenticate (who) and requireRole (may they, here)
 
@@ -119,10 +119,10 @@ npm run dev
 
 Two traps worth knowing, both learned the hard way:
 
-- **`prisma db push` is not part of the build.** Render runs `npm install`,
-  which triggers `prisma generate` — that generates the *client*, not the
-  database. Push the schema explicitly after the first deploy and after any
-  schema change.
+- **Render applies the Prisma schema during build.** The blueprint runs
+  `npm install && npm run db:push`, so optional fields added by a release exist
+  before the new API starts serving traffic. If you deploy outside the blueprint,
+  run `npm run db:push` yourself after schema changes.
 - **Asset filenames are case-sensitive in production.** `Logo.png` resolves on
   Windows and 404s on Vercel. Keep everything lowercase.
 
@@ -152,6 +152,22 @@ Two details that are deliberate rather than accidental:
 
 `/verify` is the only unauthenticated route. A recipient holding a letter is not
 a user of this system and is not asked to become one.
+
+## Register workflow
+
+Issued letters and contracts keep a private builder snapshot on the `Document`
+row. That source snapshot is available only to authenticated issuers through the
+edit route, so the register can reopen a document in the same builder that made
+it without exposing the body through the public verification portal.
+
+The register's **Edit** action opens the original letter or contract workspace
+when source is available. Re-issuing writes the same reference back to the
+register, refreshing the fingerprint, authorization details and standing.
+
+The register's **Remove** action is intentionally an archive, not a hard delete.
+Archived documents disappear from the internal working list, but their reference
+continues to resolve publicly as withdrawn. That preserves the audit trail for
+anything already printed, downloaded or sent.
 
 ### Tokens
 

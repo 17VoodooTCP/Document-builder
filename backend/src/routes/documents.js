@@ -120,9 +120,16 @@ router.post('/:slug/issue', requireRole('ISSUER'), async (req, res, next) => {
       ),
       issuedOn: core.issuedOn,
       status: ['ACTIVE', 'PENDING', 'EXPIRED', 'REVOKED'].includes(b.status) ? b.status : 'ACTIVE',
+      statusReason: null,
+      archivedAt: null,
       /* From the session, never from the body. A field recording who issued
          something is worthless if the issuer chooses what it says. */
       issuedBy: req.user.id,
+      /* Keep the private builder state with the issued record so Edit can reopen
+         the exact document even when the author never saved a separate draft.
+         The public verification route deliberately selects fields and never
+         exposes this snapshot. */
+      payload: b.payload && typeof b.payload === 'object' ? JSON.stringify(b.payload) : null,
     };
 
     const document = await prisma.document.upsert({
@@ -135,6 +142,21 @@ router.post('/:slug/issue', requireRole('ISSUER'), async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+/** Reopen an issued document in its originating builder. Source state is private. */
+router.get('/:slug/:reference/edit', requireRole('ISSUER'), async (req, res, next) => {
+  try {
+    const document = await prisma.document.findFirst({
+      where: {
+        organisationId: req.organisation.id,
+        reference: String(req.params.reference).toUpperCase(),
+      },
+    });
+    if (!document) return res.status(404).json({ error: 'No such document.' });
+    if (!document.payload) return res.status(409).json({ error: 'This older document has no saved builder source. Open its matching draft, if one exists, to edit it.' });
+    res.json({ document });
+  } catch (err) { next(err); }
 });
 
 /** Revoke or reinstate. Somebody holding a withdrawn document needs to know. */
@@ -161,14 +183,42 @@ router.patch('/:slug/:reference/status', requireRole('ISSUER'), async (req, res,
   }
 });
 
+/** Remove from the working register without destroying verification history. */
+router.delete('/:slug/:reference', requireRole('ISSUER'), async (req, res, next) => {
+  try {
+    const document = await prisma.document.update({
+      where: {
+        organisationId_reference: {
+          organisationId: req.organisation.id,
+          reference: String(req.params.reference).toUpperCase(),
+        },
+      },
+      data: {
+        archivedAt: new Date(),
+        status: 'REVOKED',
+        statusReason: 'Archived from the internal register.',
+      },
+    });
+    res.json({ document });
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'No such document.' });
+    next(err);
+  }
+});
+
 router.get('/:slug', requireRole('VIEWER'), async (req, res, next) => {
   try {
     const documents = await prisma.document.findMany({
-      where: { organisationId: req.organisation.id },
+      where: { organisationId: req.organisation.id, archivedAt: null },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-    res.json({ documents });
+    /* The builder source is private. The register gets only an availability
+       flag; the payload is returned exclusively by the authenticated edit route. */
+    res.json({ documents: documents.map(({ payload, ...document }) => ({
+      ...document,
+      sourceAvailable: Boolean(payload),
+    })) });
   } catch (err) {
     next(err);
   }
