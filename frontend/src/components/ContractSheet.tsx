@@ -77,7 +77,11 @@ export default function ContractSheet({
   ];
 
   const measureRef = useRef<HTMLDivElement>(null);
-  const [pages, setPages] = useState<number[][]>([blocks.map((_, i) => i)]);
+  /* Page membership is stored by stable block key, never by array position.
+     Positions become stale the instant a clause is removed or reordered; a
+     stale position used to make the visible renderer receive `undefined` and
+     blank the agreement while React recovered. */
+  const [pages, setPages] = useState<string[][]>([blocks.map((b) => b.key)]);
   const lastSig = useRef('');
 
   useLayoutEffect(() => {
@@ -88,8 +92,8 @@ export default function ContractSheet({
     /* Greedy fill. A block taller than a whole page gets its own page and is
        allowed to overflow rather than being dropped — the editor warns, and a
        silently missing clause would be far worse than a cramped one. */
-    const out: number[][] = [];
-    let page: number[] = [];
+    const out: string[][] = [];
+    let page: string[] = [];
     let used = 0;
     let capacity = BODY_FIRST;
 
@@ -100,7 +104,7 @@ export default function ContractSheet({
         used = 0;
         capacity = BODY_LATER;
       }
-      page.push(i);
+      page.push(blocks[i].key);
       used += h;
     });
     if (page.length) out.push(page);
@@ -120,6 +124,8 @@ export default function ContractSheet({
     b.kind === 'exec'
       ? <Execution key={b.key} draft={draft} org={org} accent={accent} ink={ink} authorizationId={authorizationId} signatureFor={signatureFor} />
       : <Clause key={b.key} n={b.index + 1} section={b.section!} accent={accent} />;
+
+  const blockByKey = new Map(blocks.map((b) => [b.key, b]));
 
   return (
     <>
@@ -205,7 +211,7 @@ export default function ContractSheet({
                   desk has to say which agreement it belongs to. */}
               <div className="flex items-baseline justify-between gap-4" style={{ paddingBottom: '2mm' }}>
                 <span className="font-sans text-[6.5pt] uppercase tracking-[0.18em] opacity-60">
-                  {org.legalName || org.name}
+                  {pageNo > 0 ? `Continued · ${org.legalName || org.name}` : (org.legalName || org.name)}
                 </span>
                 <span className="font-mono text-[6.5pt] tracking-[0.08em] opacity-60">{reference}</span>
               </div>
@@ -274,7 +280,10 @@ export default function ContractSheet({
 
               {/* Clauses assigned to this page. */}
               <div className="min-h-0 flex-1 overflow-hidden" style={{ marginTop: pageNo === 0 ? '6mm' : '5mm' }}>
-                {blockIndexes.map((i) => renderBlock(blocks[i]))}
+                {blockIndexes.map((key) => {
+                  const block = blockByKey.get(key);
+                  return block ? renderBlock(block) : null;
+                })}
               </div>
 
               {/* Foot, on every page. */}
@@ -408,6 +417,7 @@ function Execution({ draft, org, accent, ink, authorizationId, signatureFor }: {
   authorizationId: string;
   signatureFor?: (name: string) => string | null | undefined;
 }) {
+  const executionDate = longDate(draft.effectiveDate || draft.issuedOn);
   return (
     <section style={{ breakInside: 'avoid', paddingTop: '3mm' }}>
       {/* The execution block always takes the tenant's accent. It is the one
@@ -443,7 +453,15 @@ function Execution({ draft, org, accent, ink, authorizationId, signatureFor }: {
             {p.dateLine && (
               <div className="flex items-baseline gap-2" style={{ marginTop: '3mm' }}>
                 <span className="font-sans text-[6.5pt] uppercase tracking-[0.14em] opacity-55">Date</span>
-                <span style={{ flex: 1, borderBottom: `0.2mm solid ${ink}`, opacity: 0.5, height: '3.5mm' }} />
+                <span
+                  style={{
+                    flex: 1, minWidth: 0, borderBottom: `0.2mm solid ${ink}`,
+                    opacity: 0.72, minHeight: '3.5mm', paddingBottom: '0.7mm',
+                    fontSize: '7pt', fontWeight: 600,
+                  }}
+                >
+                  {executionDate || ' '}
+                </span>
               </div>
             )}
           </div>

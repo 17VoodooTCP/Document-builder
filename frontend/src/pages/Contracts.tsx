@@ -181,6 +181,7 @@ export default function Contracts() {
         title: `${doc.documentTitle} — ${doc.reference}`,
         subject: doc.parties.map((p) => p.company || p.name).filter(Boolean).join(' / '),
         author: org?.legalName || org?.name,
+        saveWithPicker: true,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not build the PDF.');

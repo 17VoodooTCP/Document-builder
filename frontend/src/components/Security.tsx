@@ -200,7 +200,7 @@ export function Signature({
 
        <div
          className="microtext"
-         style={{ color: ink, opacity: 0.82, marginTop: '0.45mm', width: 0, minWidth: '100%', letterSpacing: '0.22px' }}
+         style={{ color: ink, opacity: 0.82, marginTop: '0.45mm', width: 0, minWidth: '100%', fontSize: '4.2pt', letterSpacing: '0.12em' }}
          aria-label="Electronic facsimile signature"
        >
          ELECTRONIC FACSIMILE · AUTHORISED SIGNATORY

@@ -40,6 +40,10 @@ body {
   position: relative;
   overflow: hidden;
   background: #fff;
+  isolation: isolate;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  font-kerning: normal;
 }
 
 .sheet-scale {
@@ -88,6 +92,22 @@ body {
 
 .sheet .font-sans {
   font-family: var(--doc-chrome);
+}
+
+/* A quiet typographic baseline for the paper itself. The application chrome
+   remains Tailwind-driven; these rules only make the rendered document read as
+   one deliberate system instead of a collection of browser defaults. */
+.sheet h1,
+.sheet h2,
+.sheet p,
+.sheet address,
+.sheet dl {
+  margin-block-start: 0;
+  margin-block-end: 0;
+}
+
+.sheet .font-sans {
+  font-variant-numeric: tabular-nums;
 }
 
 /*

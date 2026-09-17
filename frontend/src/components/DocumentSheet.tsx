@@ -58,21 +58,36 @@ export default function DocumentSheet(props: Props) {
     };
 
   useLayoutEffect(() => {
-    const capacities = {
-      firstFull: firstFullRef.current?.clientHeight || 0,
-      continuedFull: continuedFullRef.current?.clientHeight || 0,
-      firstFinal: firstFinalRef.current?.clientHeight || 0,
-      continuedFinal: continuedFinalRef.current?.clientHeight || 0,
-    };
-    if (!Object.values(capacities).every(Boolean)) return;
+    const recalculate = () => {
+      /* Keep a tiny reserve for sub-pixel rounding in print/PDF engines. Without
+         it, a line that exactly fits in the browser can be clipped after the
+         sheet is rasterised at a different scale. */
+      const capacity = (node: HTMLDivElement | null) =>
+        Math.max(0, (node?.clientHeight || 0) - 2);
+      const capacities = {
+        firstFull: capacity(firstFullRef.current),
+        continuedFull: capacity(continuedFullRef.current),
+        firstFinal: capacity(firstFinalRef.current),
+        continuedFinal: capacity(continuedFinalRef.current),
+      };
+      if (!Object.values(capacities).every(Boolean)) return;
 
-    const next = paginateBody(bodyParagraphs, capacities);
-    const key = `${props.draft.body}\u0000${next.map((page) => page.join('\u0001')).join('\u0002')}\u0000${next.length}`;
-    if (key !== lastLayout.current) {
-      lastLayout.current = key;
-      setPageBodies((current) => samePages(current, next) ? current : next);
-      props.onFit?.({ pt: 9.5, overflowing: false, pages: next.length });
-    }
+      const next = paginateBody(bodyParagraphs, capacities);
+      const key = `${props.draft.body}\u0000${next.map((page) => page.join('\u0001')).join('\u0002')}\u0000${next.length}`;
+      if (key !== lastLayout.current) {
+        lastLayout.current = key;
+        setPageBodies((current) => samePages(current, next) ? current : next);
+        props.onFit?.({ pt: 9.5, overflowing: false, pages: next.length });
+      }
+    };
+
+    recalculate();
+    /* The selected typeface is local to the reader's machine. Reflow once the
+       browser has finished loading it, otherwise pagination can be calculated
+       against fallback metrics and then clip a line in the final page. */
+    let cancelled = false;
+    document.fonts?.ready.then(() => { if (!cancelled) recalculate(); });
+    return () => { cancelled = true; };
   });
 
   const pageCount = pageBodies.length;
@@ -89,7 +104,7 @@ export default function DocumentSheet(props: Props) {
     <>
       <div className="sheet-stack">
         {pageBodies.map((body, index) => (
-          <DocumentPage key={`${index}-${body.join('|').length}`} {...pageProps(body, index + 1)} />
+          <DocumentPage key={`${index}-${body.join('\u0000')}`} {...pageProps(body, index + 1)} />
         ))}
       </div>
 
