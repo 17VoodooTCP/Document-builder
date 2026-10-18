@@ -277,7 +277,6 @@ export function Stub({
 }) {
   const qr = useVerifyQr(org.slug, reference, qrOn);
   const accent = accentOf(org);
-  const url = reference ? verifyUrl(org.slug, reference).replace(/^https?:\/\//, '') : '';
   const code = checkCode(fingerprint);
   const notch: React.CSSProperties = {
     position: 'absolute', top: '-2.2mm', width: '4.4mm', height: '4.4mm', borderRadius: '50%', background: '#E4E7EC',
@@ -318,8 +317,6 @@ export function Stub({
               <dt style={LABEL}>Issued</dt>
               <dd>{issued}</dd>
             </>}
-            <dt style={LABEL}>Verify at</dt>
-            <dd className="min-w-0 font-semibold" style={{ overflowWrap: 'anywhere' }}>{url}</dd>
           </dl>
 
           <div className="flex items-end justify-between gap-4" style={{ marginTop: '2.4mm' }}>
