@@ -215,6 +215,9 @@ export interface ContractDraft {
   department: string;
 
   parties: ContractParty[];
+  /** The recitals: why the agreement exists. Printed as BACKGROUND (A), (B)…
+      before the agreed terms. Blank lines separate recitals. */
+  preamble?: string;
   sections: Section[];
 
   /** Printed above the signatures, immediately before anybody signs. */
@@ -252,11 +255,13 @@ export const newContract = (kind: ContractKind): Omit<ContractDraft, 'reference'
     executionNote:
       'The parties have executed this agreement on the dates written beside their signatures.',
     footerNote: 'Agreement · Confidential between the parties named',
+    /* microtext / frame / guilloche / holoStrip / marginRule are kept so
+       older drafts still parse; the current sheet draws none of them. */
     features: {
-      seal: true, watermark: true, qr: true, microtext: true,
-      frame: true, guilloche: true, holoStrip: true, marginRule: true,
+      seal: true, watermark: true, qr: true, microtext: false,
+      frame: false, guilloche: false, holoStrip: false, marginRule: false,
     },
-    typeface: 'times',
+    typeface: 'helvetica',
     foil: 'purple-gold',
   };
 };

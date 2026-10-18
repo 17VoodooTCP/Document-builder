@@ -33,6 +33,13 @@ export interface Organisation {
   country: string;
   supportEmail: string;
   website: string;
+  /* Added after launch; absent on older records, so optional. */
+  phone?: string | null;
+  tagline?: string | null;
+  registrationNumber?: string | null;
+  taxNumber?: string | null;
+  /** 'auto' | 'lockup' | 'logo' — see Lockup in components/DocKit. */
+  letterhead?: string | null;
   logo: string | null;
   watermark: string | null;
   seal: string | null;
@@ -131,6 +138,11 @@ export interface DocumentDraft {
   footerNote: string;
   version: string;
   revision: string;
+
+  /** The line above the signature — "Yours sincerely," by default. */
+  closing?: string;
+  /** Key into PENS (lib/ink): the ink the signature is drawn in. */
+  pen?: string;
 
   /** Key into TYPEFACES. Local families only — see lib/typefaces. */
   typeface: string;

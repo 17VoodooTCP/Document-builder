@@ -1,37 +1,45 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { PortalOrganisation } from '../lib/types';
-import { groupHex } from '../lib/fingerprint';
 import { longDate } from '../lib/format';
-import { qrDataUrl, verifyUrl } from '../lib/qr';
-import { Guilloche, HoloStrip, Signature } from './Security';
-import { foil as foilFor, typeface as typefaceFor } from '../lib/typefaces';
-import { currency, documentTotals, formatMinor, formatMoney, formatPct, formatQty, lineTotals, parseAmount } from './../lib/money';
+import { typeface as typefaceFor } from '../lib/typefaces';
+import {
+  currency, documentTotals, formatMinor, formatMoney,
+  formatPct, formatQty, lineTotals, parseAmount,
+} from '../lib/money';
 import { STATUS_LABEL, template, type BillingDraft } from '../lib/billing';
+import { paragraphs } from '../lib/format';
+import { EdgeBand, Lockup, MarkingTab, PageFoot, SignatureMark, Stub, Watermark, accentOf, inkOf } from './DocKit';
 
 /**
- * The commercial sheet.
+ * The commercial sheet — invoices, quotes, receipts and the rest.
  *
- * A second layout engine, deliberately — a letter and an invoice disagree about
- * what the page is for, and forcing one component to be both is how the Letter
- * Builder would end up carrying tax-rate logic. Nothing in DocumentSheet is
- * touched by this file.
+ * Dressed in the document kit (see DocKit). What is particular to money:
  *
- * What *is* shared is everything that makes a document look and verify like one
- * of ours: the frame, the guilloché, the foil strip, the microtext, the seal,
- * the facsimile signature, the QR and the fingerprint block all come from the
- * same modules the letters use, so a customer receiving an invoice and a letter
- * from the same organisation gets two documents that plainly belong together.
+ *   - a summary bar under the heading that answers the reader's first three
+ *     questions — which document, when it is due, how much — before the table;
+ *   - the balance due set as a solid band in the organisation's colour;
+ *   - the tear-off stub doubling as the remittance slip: amount, due date and
+ *     the reference to quote, beside the scan code.
  *
- * ── The wording rule, applied to commerce ─────────────────────────────────
+ * ── Why this paginates rather than shrinking ──────────────────────────────
  *
- * It matters more here than on a letter. A proforma that reads like an invoice
- * is a customs and tax problem for whoever receives it; a quotation that reads
- * like a demand is one that gets paid by mistake. So each template carries its
- * own foot line stating what the document is *not*, and the renderer prints it
- * whether or not anybody scrolled that far in the editor.
+ * Thirty lines is an ordinary invoice, and nobody can shorten it. So the table
+ * splits across pages: the column header repeats on every page, no row is
+ * split, and the totals, signature and stub stay together on the last page.
+ * Every block is measured off-screen at the exact width it prints at.
  */
 
 type Identity = PortalOrganisation & { watermark?: string | null };
+
+const MM = 3.7795;
+const PAD_X = '18mm';
+const PAD_TOP_MM = 14;
+const PAD_BOTTOM_MM = 21;
+const CONTENT_H = (297 - PAD_TOP_MM - PAD_BOTTOM_MM) * MM;
+/** Running head on continuation pages, with its gap. */
+const RUNNING = 12 * MM;
+/** Space between the opening blocks and the table, and above the stub. */
+const GAP = 6 * MM;
 
 interface Props {
   organisation: Identity;
@@ -42,18 +50,17 @@ interface Props {
   authorizationId: string;
   generatedAt?: string;
   signatureImage?: string | null;
-  onFit?: (info: { pt: number; overflowing: boolean }) => void;
+  /** How many pages the document currently runs to. */
+  onPages?: (n: number) => void;
 }
 
 export default function InvoiceSheet({
-  organisation: org, draft, reference, documentId, fingerprint,
-  authorizationId, generatedAt, signatureImage, onFit,
+  organisation: org, draft, reference, documentId, fingerprint, signatureImage, onPages,
 }: Props) {
-  const accent = org.accentColor || '#0F5F5C';
-  const ink = org.inkColor || '#1B2733';
+  const accent = accentOf(org);
+  const ink = inkOf(org);
   const f = draft.features;
   const tpl = template(draft.kind);
-  const foilSpec = foilFor(draft.foil);
   const face = typefaceFor(draft.typeface);
   const cur = currency(draft.currencyCode);
 
@@ -62,374 +69,421 @@ export default function InvoiceSheet({
     otherMinor: parseAmount(draft.other, cur.decimals),
     paidMinor: parseAmount(draft.paid, cur.decimals),
   });
+  const due = tpl.showsBalance ? totals.balanceMinor : totals.grandTotalMinor;
+  const addrLines = (s: string) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean);
 
-  const [qr, setQr] = useState<string | null>(null);
-  useEffect(() => {
-    if (!f.qr || !reference) { setQr(null); return; }
-    let live = true;
-    qrDataUrl(verifyUrl(org.slug, reference))
-      .then((u) => { if (live) setQr(u); })
-      .catch(() => { if (live) setQr(null); });
-    return () => { live = false; };
-  }, [f.qr, org.slug, reference]);
+  /* Blocks as values, so the measuring pass and the pages render identical
+     markup — the only way the measurement can be trusted. */
+  const headBlock = <Head org={org} draft={draft} tpl={tpl} cur={cur} accent={accent} reference={reference} due={due} />;
+  const partiesBlock = <Parties org={org} draft={draft} tpl={tpl} addrLines={addrLines} />;
+  const tableHeadBlock = <TableHead />;
+  const tailBlock = (
+    <Tail
+      org={org} draft={draft} tpl={tpl} cur={cur} totals={totals} accent={accent}
+      reference={reference} signatureImage={signatureImage}
+    />
+  );
+  const stubBlock = (
+    <Stub
+      org={org} reference={reference} documentId={documentId} fingerprint={fingerprint}
+      qrOn={f.qr} padX={PAD_X} noun={tpl.title.toLowerCase()} issued={longDate(draft.issuedOn)}
+      aside={<Remittance tpl={tpl} draft={draft} cur={cur} due={due} reference={reference} />}
+    />
+  );
 
-  /*
-   * The line table is what gives.
-   *
-   * Same approach as the letter body, and the same reason: the sheet is exactly
-   * one page, everything around the table is fixed furniture, so the table is
-   * stepped down until it clears. The floor is 6.4pt — lower than body copy
-   * tolerates, because a table of figures stays legible smaller than running
-   * prose does, and an invoice with twenty lines is ordinary.
-   */
-  const tableRef = useRef<HTMLDivElement>(null);
-  const lastFit = useRef({ pt: 0, overflowing: false });
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [pages, setPages] = useState<number[][]>([draft.lines.map((_, i) => i)]);
+  const lastSig = useRef('');
+
   useLayoutEffect(() => {
-    const el = tableRef.current;
+    const el = measureRef.current;
     if (!el) return;
-    let pt = 8.4;
-    el.style.fontSize = `${pt}pt`;
-    while (el.scrollHeight > el.clientHeight + 1 && pt > 6.4) {
-      pt = Math.round((pt - 0.1) * 10) / 10;
-      el.style.fontSize = `${pt}pt`;
-    }
-    const next = { pt, overflowing: el.scrollHeight > el.clientHeight + 1 };
-    if (next.pt !== lastFit.current.pt || next.overflowing !== lastFit.current.overflowing) {
-      lastFit.current = next;
-      onFit?.(next);
+    const kids = Array.from(el.children) as HTMLElement[];
+    /* Order matches the measuring container: head, parties, table head, every
+       row, the tail, then the stub. */
+    const headH = kids[0]?.offsetHeight ?? 0;
+    const partiesH = kids[1]?.offsetHeight ?? 0;
+    const tableHeadH = kids[2]?.offsetHeight ?? 0;
+    const rowH = draft.lines.map((_, i) => kids[3 + i]?.offsetHeight ?? 0);
+    const tailH = kids[3 + draft.lines.length]?.offsetHeight ?? 0;
+    const stubH = kids[4 + draft.lines.length]?.offsetHeight ?? 0;
+
+    const capFirst = CONTENT_H - headH - partiesH - GAP - tableHeadH;
+    const capLater = CONTENT_H - RUNNING - tableHeadH;
+    const cap = (pageIndex: number) => (pageIndex === 0 ? capFirst : capLater);
+
+    const out: number[][] = [];
+    let current: number[] = [];
+    let used = 0;
+    rowH.forEach((h, i) => {
+      if (current.length && used + h > cap(out.length)) {
+        out.push(current);
+        current = [];
+        used = 0;
+      }
+      current.push(i);
+      used += h;
+    });
+    out.push(current);
+
+    /* Totals, signature and stub stay together under the last rows, or move
+       to a page of their own — never clipped, since they are the point. */
+    if (used + tailH + GAP + stubH > cap(out.length - 1)) out.push([]);
+
+    const sig = out.map((p) => p.join(',')).join('|');
+    if (sig !== lastSig.current) {
+      lastSig.current = sig;
+      setPages(out);
+      onPages?.(out.length);
     }
   });
 
-  const address = [org.addressLine1, org.addressLine2, org.country].filter(Boolean);
-  const stamp = generatedAt || new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-  const lines = (s: string) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const sheetVars = {
+    color: ink,
+    ['--doc-body' as string]: face.body,
+    ['--doc-chrome' as string]: face.chrome,
+    ['--doc-accent' as string]: accent,
+  } as React.CSSProperties;
 
   return (
-    <article
-      className="sheet font-serif shadow-xl"
-      style={{
-        color: ink,
-        ['--doc-body' as string]: face.body,
-        ['--doc-chrome' as string]: face.chrome,
-      } as React.CSSProperties}
-      aria-label={`${org.name} — ${tpl.title} ${reference}`}
-    >
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden="true">
-        {f.watermark && org.watermark
-          ? <img src={org.watermark} alt="" className="select-none" style={{ width: '150mm', opacity: 0.13 }} />
-          : f.guilloche ? <Guilloche seed={reference} size={560} color={accent} opacity={0.1} rings={6} /> : null}
-      </div>
-
-      {f.frame && (
-        <>
-          <div className="pointer-events-none absolute" style={{ inset: '6mm', border: `0.5mm solid ${accent}`, opacity: 0.9 }} />
-          <div className="pointer-events-none absolute" style={{ inset: '7.6mm', border: `0.15mm solid ${accent}`, opacity: 0.45 }} />
-        </>
-      )}
-
-      {f.microtext && ['top', 'bottom'].map((pos) => (
-        <div
-          key={pos}
-          className="microtext pointer-events-none absolute"
-          style={{
-            ...(pos === 'bottom' ? { bottom: '4.6mm' } : { top: '4.6mm' }),
-            left: '7mm', right: '7mm', color: accent, opacity: 0.7,
-          }}
-          aria-hidden="true"
-        >
-          {`${org.legalName || org.name} · ${reference} · ${documentId} · `.repeat(20)}
-        </div>
-      ))}
-
-      <div className="relative flex flex-col" style={{ padding: '13mm 15mm 9mm', height: '297mm' }}>
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <header className="flex items-start justify-between gap-6">
-          <div className="min-w-0">
-            {org.logo
-              ? <img src={org.logo} alt={org.name} style={{ maxHeight: '14mm', maxWidth: '70mm' }} />
-              : <div className="font-serif leading-none" style={{ fontSize: '18pt', color: accent }}>{org.name}</div>}
-            <address className="text-[7pt] not-italic leading-[1.5] opacity-85" style={{ marginTop: '2.5mm' }}>
-              <div className="font-semibold">{org.legalName || org.name}</div>
-              {address.map((l) => <div key={l}>{l}</div>)}
-              {org.supportEmail && <div>{org.supportEmail}</div>}
-              {org.website && <div>{org.website}</div>}
-            </address>
-          </div>
-
-          <div className="shrink-0 text-right">
-            <h1 className="font-sans font-bold uppercase" style={{ fontSize: '15pt', letterSpacing: '0.03em', lineHeight: 1 }}>
-              {draft.documentTitle || tpl.title}
-            </h1>
-            {draft.subtitle && <div className="text-[7.5pt] opacity-70" style={{ marginTop: '1mm' }}>{draft.subtitle}</div>}
-
-            {/* Status badge. Named for the state of the money, not the file. */}
-            <div
-              className="inline-block font-sans text-[6.5pt] font-bold uppercase tracking-[0.14em]"
-              style={{
-                marginTop: '2.5mm', padding: '1mm 2.5mm',
-                border: `0.3mm solid ${accent}`, color: accent,
-              }}
-            >
-              {STATUS_LABEL[draft.status]}
-            </div>
-
-            <dl className="text-right text-[7.5pt] leading-[1.55]" style={{ marginTop: '3mm' }}>
-              <Meta label={`${tpl.title} no.`} mono>{reference}</Meta>
-              <Meta label="Issued">{longDate(draft.issuedOn)}</Meta>
-              {tpl.showsDueDate && draft.dueOn && <Meta label="Due">{longDate(draft.dueOn)}</Meta>}
-              {draft.department && <Meta label="Department">{draft.department}</Meta>}
-              <Meta label="Currency" mono>{cur.code}</Meta>
-            </dl>
-          </div>
-        </header>
-
-        <div style={{ marginTop: '4mm' }}>
-          {f.holoStrip
-            ? <HoloStrip
-                stops={foilSpec.stops}
-                text={`${(org.legalName || org.name).toUpperCase()} · ${reference}`}
-                textColor={foilSpec.text}
-                edge={foilSpec.edge}
-              />
-            : <div style={{ height: '0.6mm', background: ink }} />}
-        </div>
-
-        {/* ── Parties ────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-8" style={{ marginTop: '6mm' }}>
-          <div className="min-w-0 flex-1">
-            <div className="font-sans text-[6.5pt] uppercase tracking-[0.2em] opacity-55">{tpl.partyLabel}</div>
-            <div className="font-serif font-bold" style={{ fontSize: '11pt', marginTop: '1.5mm' }}>
-              {draft.party.name || '—'}
-            </div>
-            <div className="text-[8pt] leading-[1.5] opacity-85">
-              {draft.party.company && <div>{draft.party.company}</div>}
-              {lines(draft.party.addressLines).map((l, i) => <div key={i}>{l}</div>)}
-              {draft.party.email && <div>{draft.party.email}</div>}
-              {draft.party.phone && <div>{draft.party.phone}</div>}
-              {draft.party.taxId && <div className="font-mono text-[7pt]">Tax ID {draft.party.taxId}</div>}
-            </div>
-          </div>
-
-          {lines(draft.party.shippingLines).length > 0 && (
-            <div className="min-w-0 flex-1">
-              <div className="font-sans text-[6.5pt] uppercase tracking-[0.2em] opacity-55">Ship to</div>
-              <div className="text-[8pt] leading-[1.5] opacity-85" style={{ marginTop: '1.5mm' }}>
-                {lines(draft.party.shippingLines).map((l, i) => <div key={i}>{l}</div>)}
-              </div>
-            </div>
-          )}
-
-          {draft.classification && (
-            <div className="shrink-0 text-right" style={{ maxWidth: '48mm' }}>
-              <div style={{ height: '0.2mm', background: ink, opacity: 0.5, marginBottom: '1.5mm' }} />
-              <div className="font-sans text-[7pt] font-bold uppercase tracking-[0.14em]">{draft.classification}</div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Line items ─────────────────────────────────────────────────── */}
-        <div ref={tableRef} className="min-h-0 flex-1 overflow-hidden" style={{ marginTop: '6mm' }}>
-          <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr className="font-sans uppercase tracking-[0.1em]" style={{ fontSize: '0.78em', color: accent }}>
-                <th className="text-left" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}` }}>Description</th>
-                <th className="text-right" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}`, width: '13mm' }}>Qty</th>
-                <th className="text-left" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}`, width: '12mm' }}>Unit</th>
-                <th className="text-right" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}`, width: '22mm' }}>Unit price</th>
-                <th className="text-right" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}`, width: '14mm' }}>Disc.</th>
-                <th className="text-right" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}`, width: '13mm' }}>Tax</th>
-                <th className="text-right" style={{ padding: '1.4mm 1mm', borderBottom: `0.35mm solid ${accent}`, width: '24mm' }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.lines.map((l, i) => {
-                const t = lineTotals(l);
-                return (
-                  <tr key={l.id} style={{ borderBottom: `0.12mm solid ${ink}22` }}>
-                    <td style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }}>
-                      <span className="opacity-45" style={{ marginRight: '1.5mm' }}>{i + 1}.</span>
-                      {l.description || <span className="opacity-40">—</span>}
-                    </td>
-                    <td className="text-right font-mono tabular-nums" style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }}>{formatQty(l.qtyMilli)}</td>
-                    <td style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }} className="opacity-75">{l.unit}</td>
-                    <td className="text-right font-mono tabular-nums" style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }}>{formatMinor(l.unitPriceMinor, cur)}</td>
-                    <td className="text-right font-mono tabular-nums opacity-75" style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }}>{l.discountBp ? formatPct(l.discountBp) : '—'}</td>
-                    <td className="text-right font-mono tabular-nums opacity-75" style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }}>{l.taxBp ? formatPct(l.taxBp) : '—'}</td>
-                    <td className="text-right font-mono tabular-nums font-semibold" style={{ padding: '1.3mm 1mm', verticalAlign: 'top' }}>{formatMinor(t.netMinor, cur)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
+    <>
+      {/* Measured off-screen at the printing width, never painted. */}
+      <div
+        ref={measureRef}
+        aria-hidden="true"
+        className="sheet"
+        style={{ ...sheetVars, position: 'absolute', left: '-10000px', top: 0, height: 'auto', padding: `0 ${PAD_X}`, visibility: 'hidden' }}
+      >
+        <div>{headBlock}</div>
+        <div>{partiesBlock}</div>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}><thead>{tableHeadBlock}</thead></table>
+        {draft.lines.map((l, i) => (
+          <table key={l.id} style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <tbody><LineRow line={l} n={i + 1} cur={cur} ink={ink} /></tbody>
           </table>
-        </div>
-
-        {/* ── Totals ─────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-8" style={{ marginTop: '4mm' }}>
-          <div className="min-w-0 flex-1 text-[7pt] leading-[1.6] opacity-85">
-            {tpl.showsPayment && (
-              <>
-                <div className="font-sans text-[6.5pt] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>
-                  Payment
-                </div>
-                <dl className="font-mono" style={{ marginTop: '1.5mm' }}>
-                  {([
-                    ['Bank', draft.payment.bankName],
-                    ['Account name', draft.payment.accountName],
-                    ['Account', draft.payment.accountNumber],
-                    ['IBAN', draft.payment.iban],
-                    ['SWIFT/BIC', draft.payment.swift],
-                    ['Routing', draft.payment.routing],
-                    ['Reference', draft.payment.reference || reference],
-                  ] as const).filter(([, v]) => v).map(([k, v]) => (
-                    <div key={k} className="flex gap-2">
-                      <dt className="w-[24mm] shrink-0 font-sans opacity-55">{k}</dt>
-                      <dd className="min-w-0 flex-1 break-all">{v}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {draft.payment.notes && <p style={{ marginTop: '1.5mm' }}>{draft.payment.notes}</p>}
-              </>
-            )}
-          </div>
-
-          <div className="shrink-0" style={{ width: '68mm' }}>
-            <Row label="Subtotal" value={formatMinor(totals.subtotalMinor, cur)} />
-            {totals.discountMinor > 0 && <Row label="Discount" value={`−${formatMinor(totals.discountMinor, cur)}`} />}
-            {totals.taxBreakdown.map((b) => (
-              <Row key={b.bp} label={`Tax ${formatPct(b.bp)}`} value={formatMinor(b.taxMinor, cur)} />
-            ))}
-            {totals.taxBreakdown.length === 0 && totals.taxMinor > 0 && <Row label="Tax" value={formatMinor(totals.taxMinor, cur)} />}
-            {totals.shippingMinor !== 0 && <Row label="Shipping" value={formatMinor(totals.shippingMinor, cur)} />}
-            {totals.otherMinor !== 0 && <Row label="Other charges" value={formatMinor(totals.otherMinor, cur)} />}
-
-            <div style={{ height: '0.35mm', background: accent, margin: '1.5mm 0' }} />
-            <Row label={`Total ${cur.code}`} value={formatMoney(totals.grandTotalMinor, cur)} strong />
-
-            {tpl.showsBalance && (
-              <>
-                {totals.paidMinor !== 0 && <Row label="Amount paid" value={`−${formatMinor(totals.paidMinor, cur)}`} />}
-                <div style={{ height: '0.15mm', background: ink, opacity: 0.4, margin: '1.5mm 0' }} />
-                <Row label="Balance due" value={formatMoney(totals.balanceMinor, cur)} strong accent={accent} />
-              </>
-            )}
-
-            <p className="text-[6.5pt] leading-snug opacity-70" style={{ marginTop: '2.5mm' }}>
-              {tpl.closingNote}
-            </p>
-          </div>
-        </div>
-
-        {/* ── Signature and seal ─────────────────────────────────────────── */}
-        {(f.signature || f.seal) && (
-          <div className="flex items-end justify-between gap-6" style={{ marginTop: '5mm' }}>
-            {f.signature && draft.signerName ? (
-              <div>
-                <Signature name={draft.signerName} image={signatureImage} authorizationId={authorizationId} />
-                <div className="text-[8pt] font-bold" style={{ marginTop: '1.5mm' }}>{draft.signerName}</div>
-                <div className="text-[7pt] leading-[1.5] opacity-75">
-                  {draft.signerTitle && <div>{draft.signerTitle}</div>}
-                  <div>{org.legalName || org.name}</div>
-                </div>
-              </div>
-            ) : <div />}
-
-            {f.seal && (
-              <div className="shrink-0">
-                {org.seal
-                  ? <img src={org.seal} alt="" aria-hidden="true" style={{ width: '26mm', height: '26mm', objectFit: 'contain' }} />
-                  : <Guilloche seed={`${reference}:seal`} size={98} color={accent} opacity={0.7} rings={4} strokeWidth={0.4} />}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Foot ───────────────────────────────────────────────────────── */}
-        <div style={{ marginTop: '4mm', borderTop: `0.2mm dashed ${ink}`, opacity: 0.35 }} />
-
-        <footer style={{ marginTop: '3mm' }}>
-          <div className="flex items-start justify-between gap-6">
-            <div className="min-w-0 flex-1">
-              <div className="font-sans text-[7pt] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>
-                Terms &amp; verification
-              </div>
-              <p className="text-[6.2pt] leading-[1.5] opacity-80" style={{ marginTop: '1.2mm', maxWidth: '108mm' }}>
-                {[draft.paymentTerms, draft.latePaymentNotice, draft.terms, draft.notes].filter(Boolean).join('  ')}
-              </p>
-              <p className="text-[6.2pt] leading-[1.5] opacity-80" style={{ marginTop: '1.2mm', maxWidth: '108mm' }}>
-                Issued by {org.legalName || org.name} under reference {reference}. The details
-                below are recorded on the issuer&rsquo;s register; the register does not hold the
-                line items, so the comparison is one you make.
-              </p>
-
-              <dl className="grid grid-cols-2 gap-x-5 text-[6.2pt]" style={{ marginTop: '2mm' }}>
-                <Foot label="Document ID" mono>{documentId}</Foot>
-                <Foot label="Reference" mono>{reference}</Foot>
-                <Foot label="Total" mono>{cur.code} {formatMinor(totals.grandTotalMinor, cur)}</Foot>
-                <Foot label="Classification">{draft.classification || '—'}</Foot>
-                <Foot label="Generated" mono>{stamp}</Foot>
-                <Foot label="Authorisation" mono>{authorizationId}</Foot>
-                <Foot label="Fingerprint" mono>{groupHex(fingerprint.slice(0, 20))}</Foot>
-              </dl>
-            </div>
-
-            {f.qr && (
-              <div className="shrink-0 text-center" style={{ border: `0.2mm solid ${ink}`, padding: '2mm', width: '32mm' }}>
-                <div className="font-sans text-[5.2pt] font-bold uppercase tracking-[0.12em]">Verify this document</div>
-                {qr
-                  ? <img src={qr} alt={`Verification code for ${reference}`} style={{ width: '22mm', height: '22mm', margin: '1.5mm auto' }} />
-                  : <div style={{ width: '22mm', height: '22mm', margin: '1.5mm auto', border: `0.2mm dashed ${accent}` }} />}
-                <div style={{ height: '0.15mm', background: ink, opacity: 0.4 }} />
-                <div className="font-mono text-[4.8pt] font-semibold" style={{ marginTop: '1mm' }}>{documentId}</div>
-              </div>
-            )}
-          </div>
-
-          <div
-            className="flex items-center justify-between font-sans text-[5.5pt] uppercase tracking-[0.14em] opacity-60"
-            style={{ marginTop: '3mm' }}
-          >
-            <span>{tpl.footerNote}</span>
-            <span className="font-mono tracking-[0.08em]">{documentId}</span>
-            <span>Page 1 of 1</span>
-          </div>
-        </footer>
+        ))}
+        <div>{tailBlock}</div>
+        <div>{stubBlock}</div>
       </div>
-    </article>
+
+      <div className="sheet-stack">
+        {pages.map((rowIndexes, pageNo) => {
+          const isLast = pageNo === pages.length - 1;
+          return (
+            <article
+              key={pageNo}
+              className="sheet shadow-xl"
+              style={sheetVars}
+              aria-label={`${org.name} — ${tpl.title} ${reference}, page ${pageNo + 1} of ${pages.length}`}
+            >
+              <Watermark org={org} on={f.watermark} />
+              <EdgeBand org={org} />
+              <MarkingTab org={org} text={draft.classification} right={PAD_X} />
+
+              <div className="relative flex flex-col" style={{ padding: `${PAD_TOP_MM}mm ${PAD_X} ${PAD_BOTTOM_MM}mm`, height: '297mm' }}>
+                {pageNo === 0 ? (
+                  <>
+                    {headBlock}
+                    {partiesBlock}
+                  </>
+                ) : (
+                  /* A loose continuation page says which document it belongs to. */
+                  <div
+                    className="flex items-end justify-between gap-4 font-sans"
+                    style={{ fontSize: '7pt', height: '6mm', paddingBottom: '2.5mm', borderBottom: '0.2mm solid rgb(0 0 0 / 0.16)', marginBottom: `${RUNNING / MM - 6}mm` }}
+                  >
+                    <span className="font-semibold">{draft.documentTitle || tpl.title} · continued</span>
+                    <span className="font-mono opacity-60">{reference}</span>
+                  </div>
+                )}
+
+                <div className="min-h-0 flex-1 overflow-hidden" style={{ marginTop: pageNo === 0 ? `${GAP / MM}mm` : 0 }}>
+                  {rowIndexes.length > 0 && (
+                    <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                      <thead>{tableHeadBlock}</thead>
+                      <tbody>
+                        {rowIndexes.map((i) => (
+                          <LineRow key={draft.lines[i].id} line={draft.lines[i]} n={i + 1} cur={cur} ink={ink} />
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {isLast && tailBlock}
+                </div>
+
+                {isLast && <div style={{ marginTop: `${GAP / MM}mm` }}>{stubBlock}</div>}
+              </div>
+
+              <PageFoot org={org} note={tpl.footerNote} folio={`Page ${pageNo + 1} of ${pages.length}`} padX={PAD_X} />
+            </article>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
-function Meta({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline justify-end gap-3">
-      <dt className="font-sans text-[6pt] uppercase tracking-[0.16em] opacity-50">{label}</dt>
-      <dd className={`font-semibold ${mono ? 'font-mono tracking-[0.05em]' : ''}`}>{children}</dd>
-    </div>
-  );
-}
+/* ── Blocks ───────────────────────────────────────────────────────────────── */
 
-function Row({ label, value, strong, accent }: {
-  label: string; value: string; strong?: boolean; accent?: string;
+type Tpl = ReturnType<typeof template>;
+type Cur = ReturnType<typeof currency>;
+
+function Head({ org, draft, tpl, cur, accent, reference, due }: {
+  org: Identity; draft: BillingDraft; tpl: Tpl; cur: Cur; accent: string; reference: string; due: number;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3" style={{ padding: '0.7mm 0' }}>
-      <span className={`font-sans uppercase tracking-[0.1em] ${strong ? 'text-[7pt] font-bold' : 'text-[6.5pt] opacity-65'}`}>
-        {label}
-      </span>
-      <span
-        className={`font-mono tabular-nums ${strong ? 'text-[10pt] font-bold' : 'text-[8pt]'}`}
-        style={accent ? { color: accent } : undefined}
+    <div>
+      <header className="flex items-start justify-between gap-6">
+        <Lockup org={org} />
+
+        <div className="shrink-0 text-right" style={{ marginTop: '7mm' }}>
+          <h1 className="font-sans font-bold" style={{ fontSize: '20pt', lineHeight: 1, letterSpacing: '-0.01em' }}>
+            {draft.documentTitle || tpl.title}
+          </h1>
+          {draft.subtitle && <div style={{ fontSize: '7.5pt', opacity: 0.7, marginTop: '1.2mm' }}>{draft.subtitle}</div>}
+          {/* Named for the state of the money, not the file. */}
+          <span
+            className="mt-2 inline-block font-sans font-bold uppercase"
+            style={{ fontSize: '6pt', letterSpacing: '0.14em', height: '4.6mm', padding: '0 2.6mm', display: 'inline-flex', alignItems: 'center', lineHeight: 1, borderRadius: '999px', border: `0.3mm solid ${accent}`, color: accent }}
+          >
+            {STATUS_LABEL[draft.status]}
+          </span>
+        </div>
+      </header>
+
+      {/* The three questions a reader asks first, answered before the table. */}
+      <div
+        className="grid font-sans"
+        style={{
+          gridTemplateColumns: tpl.showsDueDate && draft.dueOn ? '1fr 1fr 1fr 1.3fr' : '1fr 1fr 1.3fr',
+          marginTop: '7mm', background: `${accent}10`, borderRadius: '1.5mm',
+        }}
       >
-        {value}
-      </span>
+        <Summary label={`${tpl.title} no.`} mono>{reference}</Summary>
+        <Summary label="Issued">{longDate(draft.issuedOn) || '—'}</Summary>
+        {tpl.showsDueDate && draft.dueOn && <Summary label="Due">{longDate(draft.dueOn)}</Summary>}
+        <Summary label={tpl.showsBalance ? 'Amount due' : 'Total'} strong accent={accent}>{formatMoney(due, cur)}</Summary>
+      </div>
     </div>
   );
 }
 
-function Foot({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+function Summary({ label, children, mono, strong, accent }: {
+  label: string; children: React.ReactNode; mono?: boolean; strong?: boolean; accent?: string;
+}) {
   return (
-    <div className="flex gap-2" style={{ paddingBottom: '0.7mm' }}>
-      <dt className="w-[20mm] shrink-0 font-sans uppercase tracking-[0.1em] opacity-50">{label}</dt>
-      <dd className={`min-w-0 flex-1 font-semibold ${mono ? 'font-mono' : ''}`}>{children}</dd>
+    <div style={{ padding: '3mm 4mm' }}>
+      <div className="uppercase" style={{ fontSize: '5.8pt', letterSpacing: '0.14em', opacity: 0.55 }}>{label}</div>
+      <div
+        className={`${mono ? 'font-mono' : ''} font-bold`}
+        style={{ fontSize: strong ? '12pt' : '8.5pt', marginTop: '0.8mm', color: strong ? accent : undefined }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Parties({ org, draft, tpl, addrLines }: {
+  org: Identity; draft: BillingDraft; tpl: Tpl; addrLines: (s: string) => string[];
+}) {
+  const ship = addrLines(draft.party.shippingLines);
+  return (
+    <div>
+    <div className="grid gap-6" style={{ gridTemplateColumns: ship.length ? '1fr 1fr 1fr' : '1fr 1fr', marginTop: '6mm', fontSize: '8pt', lineHeight: 1.5 }}>
+      <div>
+        <Label>{tpl.partyLabel}</Label>
+        <div className="font-bold" style={{ fontSize: '9.5pt' }}>{draft.party.name || '—'}</div>
+        <div style={{ opacity: 0.82 }}>
+          {draft.party.company && <div>{draft.party.company}</div>}
+          {addrLines(draft.party.addressLines).map((l, i) => <div key={i}>{l}</div>)}
+          {draft.party.email && <div>{draft.party.email}</div>}
+          {draft.party.phone && <div>{draft.party.phone}</div>}
+          {draft.party.taxId && <div className="font-mono" style={{ fontSize: '7pt' }}>Tax ID {draft.party.taxId}</div>}
+        </div>
+      </div>
+
+      {ship.length > 0 && (
+        <div>
+          <Label>Ship to</Label>
+          <div style={{ opacity: 0.82 }}>{ship.map((l, i) => <div key={i}>{l}</div>)}</div>
+        </div>
+      )}
+
+      <div>
+        <Label>From</Label>
+        <div className="font-bold" style={{ fontSize: '9.5pt' }}>{org.legalName || org.name}</div>
+        <div style={{ opacity: 0.82 }}>
+          {[org.addressLine1, org.addressLine2, org.country].filter(Boolean).map((l) => <div key={l}>{l}</div>)}
+          {org.supportEmail && <div>{org.supportEmail}</div>}
+          {draft.department && <div>{draft.department}</div>}
+          {org.taxNumber && <div className="font-mono" style={{ fontSize: '7pt' }}>Tax/VAT no. {org.taxNumber}</div>}
+          {org.registrationNumber && <div className="font-mono" style={{ fontSize: '7pt' }}>Reg. no. {org.registrationNumber}</div>}
+        </div>
+      </div>
+      </div>
+
+      {/* The written note — whatever needs saying in words before the figures. */}
+      {!!draft.message?.trim() && (
+        <div style={{ marginTop: '6mm', fontSize: '8.8pt', lineHeight: 1.6, borderLeft: '0.6mm solid rgb(0 0 0 / 0.14)', paddingLeft: '4mm' }}>
+          {paragraphs(draft.message).map((p, i, all) => (
+            <p key={i} style={{ marginBottom: i === all.length - 1 ? 0 : '2mm', whiteSpace: 'pre-line' }}>{p}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="font-sans uppercase" style={{ fontSize: '6pt', letterSpacing: '0.16em', opacity: 0.55, marginBottom: '1mm' }}>
+      {children}
+    </div>
+  );
+}
+
+const TH = (extra?: React.CSSProperties): React.CSSProperties =>
+  ({ padding: '1.6mm 1.2mm', borderBottom: '0.35mm solid currentColor', fontWeight: 700, ...extra });
+
+function TableHead() {
+  return (
+    <tr className="font-sans uppercase" style={{ fontSize: '6.4pt', letterSpacing: '0.1em' }}>
+      <th className="text-left" style={TH()}>Description</th>
+      <th className="text-right" style={TH({ width: '13mm' })}>Qty</th>
+      <th className="text-left" style={TH({ width: '12mm' })}>Unit</th>
+      <th className="text-right" style={TH({ width: '22mm' })}>Unit price</th>
+      <th className="text-right" style={TH({ width: '14mm' })}>Disc.</th>
+      <th className="text-right" style={TH({ width: '13mm' })}>Tax</th>
+      <th className="text-right" style={TH({ width: '25mm' })}>Amount</th>
+    </tr>
+  );
+}
+
+const TD: React.CSSProperties = { padding: '1.5mm 1.2mm', verticalAlign: 'top' };
+
+function LineRow({ line, n, cur, ink }: {
+  line: BillingDraft['lines'][number]; n: number; cur: Cur; ink: string;
+}) {
+  const t = lineTotals(line);
+  return (
+    <tr style={{ borderBottom: `0.15mm solid ${ink}24`, fontSize: '8.4pt' }}>
+      <td style={TD}>
+        <span className="font-mono" style={{ opacity: 0.4, marginRight: '2mm', fontSize: '7pt' }}>{String(n).padStart(2, '0')}</span>
+        {line.description || <span style={{ opacity: 0.4 }}>—</span>}
+      </td>
+      <td className="text-right font-mono tabular-nums" style={TD}>{formatQty(line.qtyMilli)}</td>
+      <td style={{ ...TD, opacity: 0.75 }}>{line.unit}</td>
+      <td className="text-right font-mono tabular-nums" style={TD}>{formatMinor(line.unitPriceMinor, cur)}</td>
+      <td className="text-right font-mono tabular-nums" style={{ ...TD, opacity: 0.75 }}>{line.discountBp ? formatPct(line.discountBp) : '—'}</td>
+      <td className="text-right font-mono tabular-nums" style={{ ...TD, opacity: 0.75 }}>{line.taxBp ? formatPct(line.taxBp) : '—'}</td>
+      <td className="text-right font-mono tabular-nums font-semibold" style={TD}>{formatMinor(t.netMinor, cur)}</td>
+    </tr>
+  );
+}
+
+/** Totals, payment details, terms and the signature — the conclusion, kept whole. */
+function Tail({ org, draft, tpl, cur, totals, accent, reference, signatureImage }: {
+  org: Identity; draft: BillingDraft; tpl: Tpl; cur: Cur;
+  totals: ReturnType<typeof documentTotals>; accent: string; reference: string;
+  signatureImage?: string | null;
+}) {
+  const f = draft.features;
+  const terms = [draft.paymentTerms, draft.latePaymentNotice, draft.terms, draft.notes].filter(Boolean).join('  ');
+  const pay = ([
+    ['Bank', draft.payment.bankName],
+    ['Account name', draft.payment.accountName],
+    ['Account', draft.payment.accountNumber],
+    ['IBAN', draft.payment.iban],
+    ['SWIFT/BIC', draft.payment.swift],
+    ['Routing', draft.payment.routing],
+    ['Reference', draft.payment.reference || reference],
+  ] as const).filter(([, v]) => v);
+
+  return (
+    <div style={{ marginTop: '5mm' }}>
+      <div className="flex items-start justify-between gap-8">
+        <div className="min-w-0 flex-1" style={{ fontSize: '7.2pt', lineHeight: 1.6 }}>
+          {tpl.showsPayment && pay.length > 0 && (
+            <div style={{ border: '0.2mm solid rgb(0 0 0 / 0.14)', borderRadius: '1.5mm', padding: '3mm 3.5mm' }}>
+              <Label>How to pay</Label>
+              <dl>
+                {pay.map(([k, v]) => (
+                  <div key={k} className="flex gap-2">
+                    <dt className="w-[23mm] shrink-0 font-sans" style={{ opacity: 0.55 }}>{k}</dt>
+                    <dd className="min-w-0 flex-1 break-all font-mono">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+              {draft.payment.notes && <p style={{ marginTop: '1.5mm' }}>{draft.payment.notes}</p>}
+            </div>
+          )}
+          {terms && <p style={{ marginTop: '3mm', fontSize: '6.8pt', opacity: 0.75 }}>{terms}</p>}
+        </div>
+
+        <div className="shrink-0 font-sans" style={{ width: '70mm' }}>
+          <Row label="Subtotal" value={formatMinor(totals.subtotalMinor, cur)} />
+          {totals.discountMinor > 0 && <Row label="Discount" value={`−${formatMinor(totals.discountMinor, cur)}`} />}
+          {totals.taxBreakdown.map((b) => (
+            <Row key={b.bp} label={`Tax ${formatPct(b.bp)}`} value={formatMinor(b.taxMinor, cur)} />
+          ))}
+          {totals.taxBreakdown.length === 0 && totals.taxMinor > 0 && <Row label="Tax" value={formatMinor(totals.taxMinor, cur)} />}
+          {totals.shippingMinor !== 0 && <Row label="Shipping" value={formatMinor(totals.shippingMinor, cur)} />}
+          {totals.otherMinor !== 0 && <Row label="Other charges" value={formatMinor(totals.otherMinor, cur)} />}
+          <div style={{ borderTop: '0.3mm solid currentColor', margin: '1.2mm 0' }} />
+          <Row label={`Total ${cur.code}`} value={formatMoney(totals.grandTotalMinor, cur)} bold />
+          {tpl.showsBalance && totals.paidMinor !== 0 && <Row label="Paid" value={`−${formatMinor(totals.paidMinor, cur)}`} />}
+
+          {tpl.showsBalance && (
+            <div className="flex items-baseline justify-between" style={{ background: accent, color: '#fff', borderRadius: '1.5mm', padding: '2.4mm 3mm', marginTop: '2mm' }}>
+              <span className="font-bold uppercase" style={{ fontSize: '6.8pt', letterSpacing: '0.12em' }}>Balance due</span>
+              <span className="font-mono font-bold" style={{ fontSize: '11pt' }}>{formatMoney(totals.balanceMinor, cur)}</span>
+            </div>
+          )}
+          {tpl.closingNote && <p style={{ fontSize: '6.5pt', lineHeight: 1.45, opacity: 0.65, marginTop: '2mm' }}>{tpl.closingNote}</p>}
+        </div>
+      </div>
+
+      {((f.signature && draft.signerName) || (f.seal && org.seal)) && (
+        <div className="flex items-end justify-between gap-6" style={{ marginTop: '5mm' }}>
+          {f.signature && draft.signerName ? (
+            <div>
+              <SignatureMark image={signatureImage} width="58mm" />
+              <div className="font-bold" style={{ fontSize: '8.4pt', marginTop: '1mm' }}>{draft.signerName}</div>
+              <div style={{ fontSize: '7pt', lineHeight: 1.45, opacity: 0.72 }}>
+                {draft.signerTitle && <div>{draft.signerTitle}</div>}
+                <div>{org.legalName || org.name}</div>
+              </div>
+            </div>
+          ) : <div />}
+          {f.seal && org.seal && (
+            <img src={org.seal} alt="" aria-hidden="true" className="shrink-0" style={{ width: '24mm', height: '24mm', objectFit: 'contain' }} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The right-hand side of the stub: what to pay, by when, quoting what. */
+function Remittance({ tpl, draft, cur, due, reference }: {
+  tpl: Tpl; draft: BillingDraft; cur: Cur; due: number; reference: string;
+}) {
+  return (
+    <div className="font-sans" style={{ width: '44mm', fontSize: '7pt', lineHeight: 1.45 }}>
+      <Label>{tpl.showsBalance ? 'Amount due' : 'Total'}</Label>
+      <div className="font-mono font-bold" style={{ fontSize: '12pt', lineHeight: 1.1 }}>{formatMoney(due, cur)}</div>
+      {tpl.showsDueDate && draft.dueOn && <div style={{ marginTop: '1mm', opacity: 0.75 }}>By {longDate(draft.dueOn)}</div>}
+      <div style={{ opacity: 0.75 }}>Quote <span className="font-mono font-semibold">{draft.payment.reference || reference}</span></div>
+    </div>
+  );
+}
+
+function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3" style={{ padding: '0.7mm 0' }}>
+      <span style={{ fontSize: bold ? '7.5pt' : '7pt', fontWeight: bold ? 700 : 400, opacity: bold ? 1 : 0.7 }}>{label}</span>
+      <span className="font-mono tabular-nums" style={{ fontSize: bold ? '9.5pt' : '8pt', fontWeight: bold ? 700 : 400 }}>{value}</span>
     </div>
   );
 }

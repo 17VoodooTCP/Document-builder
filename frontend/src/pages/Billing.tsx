@@ -5,7 +5,7 @@ import { fingerprint, newReference, sha256Hex } from '../lib/fingerprint';
 import { isoDate } from '../lib/format';
 import { verifyUrl } from '../lib/qr';
 import { downloadPdf, pdfFilename } from '../lib/pdf';
-import { DEFAULT_FOIL, DEFAULT_TYPEFACE, FOILS, TYPEFACES } from '../lib/typefaces';
+import { DEFAULT_FOIL, TYPEFACES } from '../lib/typefaces';
 import {
   CURRENCIES, currency, documentTotals, formatMinor, formatMoney,
   formatPct, formatQty, parseAmount, parsePct, parseQty,
@@ -57,11 +57,13 @@ const blank = (kind: BillingKind = 'INVOICE'): BillingDraft => ({
   notes: '',
   signerName: '',
   signerTitle: '',
+  /* microtext / frame / guilloche / holoStrip are kept so older drafts still
+     parse; the current sheet draws none of them. */
   features: {
-    seal: true, watermark: true, qr: true, microtext: true,
-    frame: true, guilloche: true, holoStrip: true, signature: true,
+    seal: true, watermark: true, qr: true, microtext: false,
+    frame: false, guilloche: false, holoStrip: false, signature: true,
   },
-  typeface: DEFAULT_TYPEFACE,
+  typeface: 'helvetica',
   foil: DEFAULT_FOIL,
 });
 
@@ -76,7 +78,7 @@ export default function Billing() {
   const [savedDraftId, setSavedDraftId] = useState<string | null>(draftId);
   const [print, setPrint] = useState({ fingerprint: '', authorizationId: '', documentId: '' });
   const [issued, setIssued] = useState<IssuedDocument | null>(null);
-  const [fit, setFit] = useState({ pt: 8.4, overflowing: false });
+  const [pageCount, setPageCount] = useState(1);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'save' | 'issue' | 'pdf' | null>(null);
   const [picking, setPicking] = useState(!draftId);
@@ -248,7 +250,16 @@ export default function Billing() {
   }
 
   async function savePdf() {
-    const sheet = sheetRef.current?.querySelector<HTMLElement>('.sheet');
+    /*
+     * The whole stack, not the first sheet.
+     *
+     * This captured `.sheet` back when an invoice was always one page. Now that
+     * the line table paginates, that selector would have exported page one and
+     * silently dropped every billable line after it — the exact failure the
+     * pagination work existed to remove, reintroduced one layer down.
+     */
+    const sheet = sheetRef.current?.querySelector<HTMLElement>('.sheet-stack')
+      || sheetRef.current?.querySelector<HTMLElement>('.sheet');
     if (!sheet) return;
     setBusy('pdf');
     setError('');
@@ -323,6 +334,15 @@ export default function Billing() {
             </div>
             <Field label="Tax ID"><Input value={doc.party.taxId} onChange={(e) => setParty('taxId', e.target.value)} className="font-mono" /></Field>
           </div>
+        </Card>
+
+        <Card title="Message" description="A written note to the customer, printed above the line items. Optional.">
+          <Textarea
+            rows={4}
+            value={doc.message || ''}
+            onChange={(e) => set('message', e.target.value)}
+            placeholder={'Thank you for your instruction. This invoice covers the first phase of work, as agreed on 14 October.\n\nLeave a blank line between paragraphs.'}
+          />
         </Card>
 
         <Card title="Line items" description={`${doc.lines.length} line${doc.lines.length === 1 ? '' : 's'}. Tax is charged on the discounted figure.`}>
@@ -424,13 +444,12 @@ export default function Billing() {
           </div>
         </Card>
 
-        <Card title="Blocks" description="The same furniture the letters use.">
+        <Card title="Page" description="The same page design the letters and agreements use.">
           <div className="space-y-2">
             {([
-              ['signature', 'Signature'], ['seal', org.seal ? 'Seal' : 'Seal — none uploaded'],
-              ['watermark', org.watermark ? 'Watermark' : 'Watermark — none uploaded'],
-              ['qr', 'Verification code'], ['microtext', 'Microtext'],
-              ['frame', 'Frame'], ['guilloche', 'Guilloché'], ['holoStrip', 'Foil strip'],
+              ['signature', 'Signature'], ['seal', org.seal ? 'Seal' : 'Seal — upload one in Identity'],
+              ['watermark', org.watermark ? 'Watermark' : org.logo ? 'Watermark (a wide logo, faint)' : 'Watermark — upload one in Identity'],
+              ['qr', 'Scan code on the stub'],
             ] as const).map(([k, label]) => (
               <Toggle
                 key={k}
@@ -440,15 +459,10 @@ export default function Billing() {
               />
             ))}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="mt-4">
             <Field label="Typeface">
               <Select value={doc.typeface} onChange={(e) => set('typeface', e.target.value)}>
                 {Object.entries(TYPEFACES).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
-              </Select>
-            </Field>
-            <Field label="Foil">
-              <Select value={doc.foil} onChange={(e) => set('foil', e.target.value)}>
-                {Object.entries(FOILS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </Select>
             </Field>
           </div>
@@ -466,16 +480,12 @@ export default function Billing() {
           </Button>
           <Button onClick={savePdf} loading={busy === 'pdf'} disabled={!issued || !!mismatch}>Download PDF</Button>
           <Button variant="secondary" onClick={() => window.print()} disabled={!issued || !!mismatch}>Print</Button>
+          <span className="ml-auto font-mono text-xs text-slate-400">
+            {pageCount} page{pageCount === 1 ? '' : 's'}
+          </span>
         </div>
 
         <div className="no-print mb-4 space-y-3">
-          {fit.overflowing && (
-            <Banner>
-              There are more line items than fit on one page, so the last of them are being
-              cut off. Remove lines, or split this across two documents, before issuing.
-              Multi-page tables are not built yet.
-            </Banner>
-          )}
           {issued ? (
             mismatch ? (
               <Banner>
@@ -511,7 +521,7 @@ export default function Billing() {
               authorizationId={print.authorizationId}
               generatedAt={issued ? issued.generatedAt.replace('T', ' ').slice(0, 19) + ' UTC' : undefined}
               signatureImage={chosen?.signature}
-              onFit={setFit}
+              onPages={setPageCount}
             />
           </SheetPreview>
         </div>

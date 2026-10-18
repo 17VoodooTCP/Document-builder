@@ -187,6 +187,8 @@ export interface BillingDraft {
   department: string;
 
   party: Party;
+  /** A written note to the customer, printed above the line items. */
+  message?: string;
   lines: LineItem[];
 
   currencyCode: string;

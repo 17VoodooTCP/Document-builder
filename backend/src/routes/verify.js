@@ -33,7 +33,8 @@ router.get('/:slug/:reference', async (req, res, next) => {
       select: {
         slug: true, name: true, legalName: true,
         addressLine1: true, addressLine2: true, country: true,
-        supportEmail: true, website: true,
+        supportEmail: true, website: true, phone: true,
+        tagline: true, registrationNumber: true, letterhead: true,
         logo: true, seal: true, accentColor: true, inkColor: true,
       },
     });

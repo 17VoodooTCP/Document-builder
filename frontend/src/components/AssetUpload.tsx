@@ -20,7 +20,7 @@ type Kind = 'logo' | 'watermark' | 'seal';
 const COPY: Record<Kind, { label: string; hint: string; box: string }> = {
   logo: {
     label: 'Logo',
-    hint: 'Sits in the letterhead. Transparent PNG or SVG-flattened artwork works best.',
+    hint: 'SVG or a transparent PNG works best. Empty margins are trimmed automatically, so the mark prints at full size.',
     box: 'h-20 w-full',
   },
   watermark: {
@@ -109,7 +109,7 @@ export default function AssetUpload({ slug, kind, value, onChange, disabled }: P
       <input
         ref={input}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+        accept="image/svg+xml,.svg,image/png,image/jpeg,image/webp,image/gif,image/avif"
         className="hidden"
         onChange={(e) => pick(e.target.files?.[0])}
       />

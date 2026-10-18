@@ -50,6 +50,54 @@ body {
   transform-origin: top center;
 }
 
+/* The write surface: one sheet that grows with the letter. Pagination happens
+   in the final view; here the page simply keeps going. */
+.sheet.sheet--write {
+  height: auto;
+  min-height: 297mm;
+  overflow: visible;
+}
+
+/*
+ * Fields typed straight onto the paper.
+ *
+ * They inherit the letter's own type, so what is typed is what prints. No box
+ * and no background — a faint accent outline on hover and focus is the only
+ * sign that a line of the letter is a field.
+ */
+.sheet-field {
+  display: block;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  border-radius: 2px;
+  outline: 1px solid transparent;
+  outline-offset: 3px;
+  transition: outline-color 120ms ease, background-color 120ms ease;
+}
+
+.sheet-field::placeholder {
+  color: currentColor;
+  opacity: 0.32;
+  font-weight: 400;
+}
+
+.sheet-field:hover {
+  outline-color: color-mix(in srgb, var(--doc-accent, #0f5f5c) 30%, transparent);
+}
+
+.sheet-field:focus {
+  outline: 1.5px solid color-mix(in srgb, var(--doc-accent, #0f5f5c) 70%, transparent);
+  background: color-mix(in srgb, var(--doc-accent, #0f5f5c) 4%, transparent);
+}
+
 /*
  * A stack of pages.
  *

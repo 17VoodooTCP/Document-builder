@@ -4,7 +4,7 @@ import { api, ApiError } from '../lib/api';
 import { fingerprint, newReference, sha256Hex } from '../lib/fingerprint';
 import { verifyUrl } from '../lib/qr';
 import { downloadPdf, pdfFilename } from '../lib/pdf';
-import { FOILS, TYPEFACES } from '../lib/typefaces';
+import { TYPEFACES } from '../lib/typefaces';
 import {
   blankField, blankParty, blankSection, CONTRACT_STATUS_LABEL, CONTRACT_TEMPLATES,
   contractTemplate, newContract, PARTICULARS,
@@ -308,6 +308,18 @@ export default function Contracts() {
         </Card>
 
         <Card
+          title="Background"
+          description="Why this agreement exists, in your own words. Printed as recitals (A), (B), (C)… before the clauses. Leave a blank line between recitals."
+        >
+          <Textarea
+            rows={5}
+            value={doc.preamble || ''}
+            onChange={(e) => set('preamble', e.target.value)}
+            placeholder={'The Client wishes to engage the Contractor to provide design services.\n\nThe Contractor has agreed to provide those services on the terms of this agreement.'}
+          />
+        </Card>
+
+        <Card
           title="Clauses"
           description={`${doc.sections.length} numbered. Numbering follows position, so reordering renumbers.`}
           actions={<Button variant="secondary" onClick={() => mutSections((s) => [...s, blankSection()])}>Add clause</Button>}
@@ -333,7 +345,7 @@ export default function Contracts() {
                 <Textarea
                   rows={4}
                   className="mt-2"
-                  placeholder="Clause text. Blank lines separate paragraphs."
+                  placeholder="Clause text. Leave a blank line between paragraphs — each becomes a numbered sub-clause (1.1, 1.2…)."
                   value={s.body}
                   onChange={(e) => mutSections((a) => { a[i] = { ...a[i], body: e.target.value }; return a; })}
                 />
@@ -454,26 +466,20 @@ export default function Contracts() {
           </div>
         </Card>
 
-        <Card title="Blocks">
+        <Card title="Page">
           <div className="space-y-2">
             {([
-              ['seal', org.seal ? 'Seal' : 'Seal — none uploaded'],
-              ['watermark', org.watermark ? 'Watermark' : 'Watermark — none uploaded'],
-              ['qr', 'Verification code'], ['microtext', 'Microtext'], ['frame', 'Frame'],
-              ['guilloche', 'Guilloché'], ['holoStrip', 'Foil strip'], ['marginRule', 'Margin classification'],
+              ['seal', org.seal ? 'Seal under the signatures' : 'Seal — upload one in Identity'],
+              ['watermark', org.watermark ? 'Watermark' : org.logo ? 'Watermark (a wide logo, faint)' : 'Watermark — upload one in Identity'],
+              ['qr', 'Scan code on the stub'],
             ] as const).map(([k, label]) => (
               <Toggle key={k} label={label} checked={doc.features[k]} onChange={(v) => set('features', { ...doc.features, [k]: v })} />
             ))}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="mt-4">
             <Field label="Typeface">
               <Select value={doc.typeface} onChange={(e) => set('typeface', e.target.value)}>
                 {Object.entries(TYPEFACES).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
-              </Select>
-            </Field>
-            <Field label="Foil">
-              <Select value={doc.foil} onChange={(e) => set('foil', e.target.value)}>
-                {Object.entries(FOILS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </Select>
             </Field>
           </div>

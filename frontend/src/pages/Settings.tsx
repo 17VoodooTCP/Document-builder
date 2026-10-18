@@ -72,6 +72,11 @@ function Details({ org, onSaved }: { org: Organisation; onSaved: (o: Organisatio
           country: form.country,
           supportEmail: form.supportEmail,
           website: form.website,
+          phone: form.phone || '',
+          tagline: form.tagline || '',
+          registrationNumber: form.registrationNumber || '',
+          taxNumber: form.taxNumber || '',
+          letterhead: form.letterhead || 'auto',
           accentColor: form.accentColor,
           inkColor: form.inkColor,
           referencePrefix: form.referencePrefix,
@@ -126,6 +131,47 @@ function Details({ org, onSaved }: { org: Organisation; onSaved: (o: Organisatio
             <Input value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="northwind.example" />
           </Field>
         </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Phone">
+            <Input value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} placeholder="Optional" />
+          </Field>
+          <Field label="Tagline" hint="Set under the name in the letterhead.">
+            <Input value={form.tagline || ''} onChange={(e) => set('tagline', e.target.value)} placeholder="e.g. Advisory & Legal" />
+          </Field>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Company registration no." hint="Printed at the foot of every page.">
+            <Input value={form.registrationNumber || ''} onChange={(e) => set('registrationNumber', e.target.value)} placeholder="Optional" />
+          </Field>
+          <Field label="Tax / VAT no." hint="Printed on invoices and at the foot of every page.">
+            <Input value={form.taxNumber || ''} onChange={(e) => set('taxNumber', e.target.value)} placeholder="Optional" />
+          </Field>
+        </div>
+
+        <Field label="Letterhead" hint="How your logo and name are set at the top of every document.">
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ['auto', 'Automatic', 'Name beside a square logo; a wide logo alone'],
+              ['lockup', 'Logo + name', 'Always typeset the name beside the logo'],
+              ['logo', 'Logo only', 'Your artwork already contains the name'],
+            ] as const).map(([value, title, note]) => {
+              const on = (form.letterhead || 'auto') === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => set('letterhead', value)}
+                  className={`rounded-lg border p-2.5 text-left transition ${on ? 'border-slate-900 ring-2 ring-slate-900' : 'border-slate-200 hover:border-slate-400'}`}
+                >
+                  <span className="block text-sm font-medium text-slate-900">{title}</span>
+                  <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{note}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <ColorField
@@ -243,6 +289,67 @@ function Signatories({ slug }: { slug: string }) {
     }
   }
 
+  /*
+   * Bulk add: one cropped signature per file, the person's name taken from the
+   * filename ("james-carter.png" → "James Carter"). Each name stays editable
+   * before anything is saved, and people already on file are skipped so
+   * running the same folder twice does not create duplicates.
+   */
+  const [bulk, setBulk] = useState<{ name: string; signature: string }[] | null>(null);
+  const [bulkDone, setBulkDone] = useState(0);
+
+  function nameFromFile(file: string) {
+    return file
+      .replace(/\.[^.]+$/, '')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  }
+
+  function pickBulk(files: FileList | null) {
+    if (!files?.length) return setBulk(null);
+    Promise.all(
+      Array.from(files).map(
+        (file) => new Promise<{ name: string; signature: string }>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve({ name: nameFromFile(file.name), signature: String(reader.result) });
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        }),
+      ),
+    )
+      .then((list) => setBulk(list.sort((a, b) => a.name.localeCompare(b.name))))
+      .catch(() => setError('One of those files could not be read.'));
+  }
+
+  const onFile = new Set((rows ?? []).map((s) => s.name.trim().toLowerCase()));
+  const toAdd = (bulk ?? []).filter((b) => b.name.trim() && !onFile.has(b.name.trim().toLowerCase()));
+
+  async function addBulk() {
+    setBusy(true);
+    setError('');
+    setBulkDone(0);
+    try {
+      /* One at a time: each image is re-encoded server-side, and a failure
+         should stop at the file that caused it rather than leave a scatter. */
+      for (const b of toAdd) {
+        await api(`/organisations/${slug}/signatories`, {
+          method: 'POST',
+          body: { name: b.name.trim(), title: '', department: '', signature: b.signature },
+        });
+        setBulkDone((n) => n + 1);
+      }
+      setBulk(null);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not add those signatories.');
+      load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retire(id: string, who: string) {
     if (!window.confirm(`Retire ${who}? Documents already issued keep their name — this only removes them from the list of people who can be chosen.`)) return;
     try {
@@ -258,15 +365,63 @@ function Signatories({ slug }: { slug: string }) {
   return (
     <Card
       title="Signatories"
-      description="Who may be named at the bottom of a document."
-      actions={!adding && <Button variant="secondary" onClick={() => setAdding(true)}>Add</Button>}
+      description="Who may sign. The letter builder only offers staff with their own signature on file."
+      actions={!adding && !bulk && (
+        <div className="flex gap-2">
+          <label className="inline-flex cursor-pointer items-center rounded-md px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50">
+            Add from files
+            <input
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp"
+              className="sr-only"
+              onChange={(e) => { pickBulk(e.target.files); e.target.value = ''; }}
+            />
+          </label>
+          <Button variant="secondary" onClick={() => setAdding(true)}>Add</Button>
+        </div>
+      )}
     >
       {error && <div className="mb-4"><Banner>{error}</Banner></div>}
 
+      {bulk && (
+        <div className="mb-4 space-y-3 rounded-lg border border-slate-200 p-3">
+          <p className="text-sm text-slate-600">
+            One signature per file. Check each name matches the signature above it, then add.
+          </p>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {bulk.map((b, i) => {
+              const dup = onFile.has(b.name.trim().toLowerCase());
+              return (
+                <li key={i} className="rounded-md border border-slate-100 p-2">
+                  <span className="flex h-12 items-center justify-center">
+                    <img src={b.signature} alt="" className="max-h-12 max-w-full object-contain" />
+                  </span>
+                  <Input
+                    aria-label="Name"
+                    value={b.name}
+                    onChange={(e) => setBulk((list) => list!.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                    className="mt-1"
+                  />
+                  {dup && <span className="text-[11px] text-slate-500">Already on file — will be skipped.</span>}
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex items-center gap-2">
+            <Button onClick={addBulk} loading={busy} disabled={!toAdd.length}>
+              Add {toAdd.length} {toAdd.length === 1 ? 'signatory' : 'signatories'}
+            </Button>
+            <Button variant="ghost" onClick={() => setBulk(null)} disabled={busy}>Cancel</Button>
+            {busy && <span className="text-xs text-slate-500">{bulkDone} of {toAdd.length}</span>}
+          </div>
+        </div>
+      )}
+
       {rows.length === 0 && !adding ? (
         <Empty title="No signatories yet.">
-          A document can still be issued — the builder will set the typed name in a
-          script face, which is a facsimile either way.
+          Add each member of staff with their own handwritten signature. Letters
+          cannot be issued until at least one is on file.
         </Empty>
       ) : (
         <ul className="divide-y divide-slate-100">
@@ -307,7 +462,7 @@ function Signatories({ slug }: { slug: string }) {
 
           <Field
             label="Signature image"
-            hint="Optional. A scan on white is fine — it is re-encoded on the way in. Without one, the name is set in a script face."
+            hint="Their own handwritten signature. A scan on white is fine — it is re-encoded on the way in. Without one, they will not appear in the letter builder."
           >
             <input
               type="file"

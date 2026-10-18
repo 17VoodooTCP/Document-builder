@@ -33,7 +33,8 @@ const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 const publicShape = {
   id: true, slug: true, name: true, legalName: true,
   addressLine1: true, addressLine2: true, country: true,
-  supportEmail: true, website: true,
+  supportEmail: true, website: true, phone: true,
+  tagline: true, registrationNumber: true, taxNumber: true, letterhead: true,
   logo: true, watermark: true, seal: true,
   accentColor: true, inkColor: true, referencePrefix: true,
 };
@@ -149,9 +150,13 @@ router.post('/',
 router.patch('/:slug', requireRole('OWNER'), async (req, res, next) => {
   const b = req.body || {};
   const data = {};
-  for (const k of ['name', 'legalName', 'addressLine1', 'addressLine2', 'country', 'supportEmail', 'website']) {
-    if (typeof b[k] === 'string') data[k] = b[k].trim();
+  for (const k of [
+    'name', 'legalName', 'addressLine1', 'addressLine2', 'country', 'supportEmail', 'website',
+    'phone', 'tagline', 'registrationNumber', 'taxNumber',
+  ]) {
+    if (typeof b[k] === 'string') data[k] = b[k].trim().slice(0, 160);
   }
+  if (['auto', 'lockup', 'logo'].includes(b.letterhead)) data.letterhead = b.letterhead;
   for (const k of ['accentColor', 'inkColor']) {
     if (/^#[0-9a-f]{6}$/i.test(b[k] || '')) data[k] = b[k];
   }

@@ -25,8 +25,10 @@
 const A4_W_MM = 210;
 const A4_H_MM = 297;
 
-/** 3× CSS pixels ≈ 300dpi at A4. Below this hairlines and microtext break up. */
-const CAPTURE_SCALE = 3;
+/** 4× CSS pixels ≈ 400dpi at A4: type stays crisp under a loupe, and the
+    0.25mm modules of the stub's barcode land on near-whole pixels (≈3.8px),
+    so a scanner reads clean edges rather than antialiased grey. */
+const CAPTURE_SCALE = 4;
 
 export interface PdfMeta {
   title?: string;

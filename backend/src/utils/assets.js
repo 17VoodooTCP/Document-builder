@@ -15,17 +15,19 @@ const sharp = require('sharp');
 
 /** What each slot is for, and how large it is allowed to end up. */
 const PROFILES = {
-  /* Sits in the letterhead at roughly 180px, and on the portal at 76px. */
-  logo: { width: 512, height: 512, fit: 'inside', quality: 88, maxKb: 260 },
+  /* Printed up to ~80mm wide in the letterhead. 1600px keeps a wordmark crisp
+     at 300dpi rather than softening into the paper. Trimmed: empty margin
+     around the artwork is what made uploaded logos print small. */
+  logo: { width: 1600, height: 800, fit: 'inside', quality: 92, maxKb: 420, trim: true },
   /* Behind the body at low opacity. Fine detail matters — see the note in the
      renderer about iridescence washing out before shapes do — so this one is
      allowed more room than its display size suggests. */
   watermark: { width: 900, height: 1200, fit: 'inside', quality: 84, maxKb: 420 },
   /* Struck beside the signature at ~122px, but a seal is meant to reward
      magnification, so it is kept at print resolution. */
-  seal: { width: 900, height: 900, fit: 'inside', quality: 86, maxKb: 400 },
+  seal: { width: 900, height: 900, fit: 'inside', quality: 86, maxKb: 400, trim: true },
   /* A facsimile signature, usually a scan with a white background. */
-  signature: { width: 700, height: 300, fit: 'inside', quality: 88, maxKb: 160 },
+  signature: { width: 700, height: 300, fit: 'inside', quality: 88, maxKb: 160, trim: true },
   /* An operator-supplied payment QR code.
      Quality is pinned high and the box is generous because this one is read by
      a camera rather than by a person: re-encoding a QR too hard closes up the
@@ -34,7 +36,7 @@ const PROFILES = {
   qr: { width: 900, height: 900, fit: 'inside', quality: 96, maxKb: 320 },
 };
 
-const DATA_URL = /^data:(image\/(png|jpe?g|webp|gif|avif));base64,([A-Za-z0-9+/=]+)$/;
+const DATA_URL = /^data:(image\/(png|jpe?g|webp|gif|avif|svg\+xml));base64,([A-Za-z0-9+/=]+)$/;
 
 class AssetError extends Error {
   constructor(message) {
@@ -61,10 +63,11 @@ async function ingest(dataUrl, kind) {
 
   const match = DATA_URL.exec(dataUrl.trim());
   if (!match) {
-    throw new AssetError('Upload a PNG, JPEG, WebP, GIF or AVIF image.');
+    throw new AssetError('Upload an SVG, PNG, JPEG, WebP, GIF or AVIF image.');
   }
 
   const raw = Buffer.from(match[3], 'base64');
+  const isSvg = match[2] === 'svg+xml';
 
   /*
    * Refuse anything absurd before decoding it. A decoder handed a deliberately
@@ -75,18 +78,35 @@ async function ingest(dataUrl, kind) {
     throw new AssetError('That image is over 12MB. Please upload a smaller file.');
   }
 
+  /*
+   * SVG is rasterised here and never stored as SVG. An SVG is a document that
+   * can carry script and external references; drawn to pixels on the server,
+   * none of that can reach a page. It is rendered dense enough that the
+   * resize below always shrinks rather than enlarges, so vector artwork comes
+   * out at the full print resolution of the slot.
+   */
+  const source = () => sharp(raw, { failOn: 'error', ...(isSvg ? { density: 600 } : {}) });
+
+  /* Trim the empty margin around the artwork. sharp takes the top-left pixel
+     as the background, so this removes transparent margins and paper-white
+     margins alike. PNG in between: lossless, and SVG cannot be re-emitted. */
+  const encode = async (quality) => {
+    let img = source().rotate(); // honour EXIF orientation; phone photos of a stamp arrive sideways
+    if (profile.trim) {
+      const trimmed = await img.png().toBuffer()
+        .then((data) => sharp(data).trim({ threshold: 18 }).png().toBuffer())
+        .catch(() => null);
+      if (trimmed) img = sharp(trimmed);
+    }
+    return img
+      .resize({ width: profile.width, height: profile.height, fit: profile.fit, withoutEnlargement: !isSvg })
+      .webp({ quality, alphaQuality: 100 })
+      .toBuffer();
+  };
+
   let out;
   try {
-    out = await sharp(raw, { failOn: 'error' })
-      .rotate() // honour EXIF orientation; phone photos of a stamp arrive sideways
-      .resize({
-        width: profile.width,
-        height: profile.height,
-        fit: profile.fit,
-        withoutEnlargement: true,
-      })
-      .webp({ quality: profile.quality })
-      .toBuffer();
+    out = await encode(profile.quality);
   } catch {
     throw new AssetError('That file could not be read as an image.');
   }
@@ -99,10 +119,7 @@ async function ingest(dataUrl, kind) {
   let quality = profile.quality;
   while (out.length > profile.maxKb * 1024 && quality > 40) {
     quality -= 12;
-    out = await sharp(raw).rotate()
-      .resize({ width: profile.width, height: profile.height, fit: profile.fit, withoutEnlargement: true })
-      .webp({ quality })
-      .toBuffer();
+    out = await encode(quality);
   }
 
   if (out.length > profile.maxKb * 1024) {

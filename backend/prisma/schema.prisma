@@ -49,6 +49,21 @@ model Organisation {
   country      String @default("")
   supportEmail String @default("")
   website      String @default("")
+  /// Optional, not defaulted: these arrived after organisations already
+  /// existed, and Prisma does not apply @default when *reading* a MongoDB
+  /// document that lacks the field — a required field would make every older
+  /// organisation fail to load.
+  phone        String?
+
+  /// The short line set under the name in the letterhead: "Advisory & Legal".
+  tagline            String?
+  /// Statutory details printed at the foot of every page, as business
+  /// stationery is required to carry them in many jurisdictions.
+  registrationNumber String?
+  taxNumber          String?
+  /// How the letterhead sets the logo: "auto" (a square mark gets the name
+  /// typeset beside it, a wide wordmark stands alone), "lockup" or "logo".
+  letterhead         String?
 
   /// Brand assets, as data URLs. Null means "fall back to type" — a document
   /// with no logo sets the name instead, which is a real letterhead rather

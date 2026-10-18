@@ -88,6 +88,27 @@ router.post('/:slug/issue', requireRole('ISSUER'), async (req, res, next) => {
   try {
     const reference = String(b.reference || newReference(org.referencePrefix)).toUpperCase();
 
+    /*
+     * The letter builder signs with a person, not a typed name.
+     *
+     * When it names a signatory, that person must be on this organisation's
+     * active list with a real signature on file, and the printed name comes
+     * from the list rather than the body — otherwise a real signature could be
+     * issued above whatever name the request chose to print beneath it.
+     */
+    if (b.signatoryId !== undefined) {
+      const signatory = /^[a-f0-9]{24}$/i.test(String(b.signatoryId))
+        ? await prisma.signatory.findFirst({
+            where: { id: String(b.signatoryId), organisationId: org.id, isActive: true },
+            select: { name: true, signature: true },
+          })
+        : null;
+      if (!signatory || !signatory.signature) {
+        return res.status(400).json({ error: 'Choose who is signing — only staff with a signature on file can sign.' });
+      }
+      b.signerName = signatory.name;
+    }
+
     const core = {
       organisationSlug: org.slug,
       reference,
